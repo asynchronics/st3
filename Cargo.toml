@@ -1,0 +1,41 @@
+[package]
+name = "st3"
+version = "0.1.0"
+authors = ["Serge Barral <serge.barral@asynchronics.com>"]
+edition = "2021"
+rust-version = "1.56"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/asynchronics/st3"
+readme = "README.md"
+description = """
+A very fast lock-free, bounded, work-stealing LIFO queue.
+"""
+categories = ["concurrency", "data-structures"]
+keywords = ["queue", "stack", "bounded", "lock-free", "work-stealing"]
+autotests = false
+autobenches = false
+
+[features]
+default = ["long_counter"]
+long_counter = []
+
+[dependencies]
+cache-padded = "1.1"
+
+[dev-dependencies]
+criterion = "0.3"
+oorandom = "11.1"
+crossbeam-deque = "0.8"
+num_cpus = "1.13"
+
+[[bench]]
+name = "benchmark"
+path = "benches/benchmark.rs"
+harness = false
+
+[[test]]
+name = "integration"
+path = "tests/tests.rs"
+
+[target.'cfg(st3_loom)'.dependencies]
+loom = "0.5"

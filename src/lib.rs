@@ -13,18 +13,14 @@
 //! [`push`](Worker::push) and only one for [`pop`](Worker::pop) and
 //! [`steal`](Stealer::steal).
 //!
-//! Although its principle of operation is quite different, it draws some ideas
-//! from Carl Lerche's FIFO work-stealing queue for the tokio scheduler, which
-//! itself took inspiration from the work-stealing queue of the Go scheduler.
-//!
 //! ## Example
 //!
 //! ```
 //! use std::thread;
-//! use st3::{Worker, B128};
+//! use st3::{Worker, B256};
 //!
-//! // Push 4 items into a queue of capacity 128.
-//! let worker = Worker::<_, B128>::new();
+//! // Push 4 items into a queue of capacity 256.
+//! let worker = Worker::<_, B256>::new();
 //! worker.push("a").unwrap();
 //! worker.push("b").unwrap();
 //! worker.push("c").unwrap();
@@ -33,7 +29,7 @@
 //! // Steal items concurrently.
 //! let stealer = worker.stealer();
 //! let th = thread::spawn(move || {
-//!     let other_worker = Worker::<_, B128>::new();
+//!     let other_worker = Worker::<_, B256>::new();
 //!
 //!     // Try to steal half the items and return the actual count of stolen items.
 //!     match stealer.steal(&other_worker, |n| n/2) {
@@ -110,8 +106,9 @@ impl fmt::Display for StealError {
 /// than necessary for buffer indexing because:
 /// - an extra bit is needed to disambiguate between empty and full buffers when
 ///   the start and end position of the buffer are equal,
-/// - the pop count is also used as a long-cycle counter to prevent ABA issues
-///   and is for this reason 48 bits wide by default.
+/// - the pop count and the head in `pop_count_and_head` are also used as
+///   long-cycle counters to prevent ABA issues in the pop CAS and in the
+///   stealer CAS.
 ///
 /// The position of the head can be at any moment determined by subtracting 2
 /// counters: the push operations counter and the pop operations counter.
@@ -181,8 +178,8 @@ impl<T, B: Buffer<T>> Drop for Queue<T, B> {
     fn drop(&mut self) {
         let head = self.head.load(Relaxed);
         let push_count = self.push_count.load(Relaxed);
-        let pop_count = unpack_counter_and_position(self.pop_count_and_head.load(Relaxed)).0;
-        let tail = push_count.wrapping_sub(as_position(pop_count));
+        let pop_count = unpack(self.pop_count_and_head.load(Relaxed)).0;
+        let tail = push_count.wrapping_sub(pop_count);
 
         let count = tail.wrapping_sub(head);
         for offset in 0..count {
@@ -222,9 +219,8 @@ impl<T, B: Buffer<T>> Worker<T, B> {
     /// call to `pop()` will fail.
     pub fn is_empty(&self) -> bool {
         let push_count = self.queue.push_count.load(Relaxed);
-        let (pop_count, head) =
-            unpack_counter_and_position(self.queue.pop_count_and_head.load(Relaxed));
-        let tail = push_count.wrapping_sub(as_position(pop_count));
+        let (pop_count, head) = unpack(self.queue.pop_count_and_head.load(Relaxed));
+        let tail = push_count.wrapping_sub(pop_count);
 
         tail == head
     }
@@ -239,9 +235,8 @@ impl<T, B: Buffer<T>> Worker<T, B> {
     /// `len()` before the stealing operation completes.
     pub fn len(&self) -> usize {
         let push_count = self.queue.push_count.load(Relaxed);
-        let (pop_count, head) =
-            unpack_counter_and_position(self.queue.pop_count_and_head.load(Relaxed));
-        let tail = push_count.wrapping_sub(as_position(pop_count));
+        let (pop_count, head) = unpack(self.queue.pop_count_and_head.load(Relaxed));
+        let tail = push_count.wrapping_sub(pop_count);
 
         tail.wrapping_sub(head) as usize
     }
@@ -254,8 +249,8 @@ impl<T, B: Buffer<T>> Worker<T, B> {
     /// as the error field.
     pub fn push(&self, item: T) -> Result<(), T> {
         let push_count = self.queue.push_count.load(Relaxed);
-        let pop_count = unpack_counter_and_position(self.queue.pop_count_and_head.load(Relaxed)).0;
-        let tail = push_count.wrapping_sub(as_position(pop_count));
+        let pop_count = unpack(self.queue.pop_count_and_head.load(Relaxed)).0;
+        let tail = push_count.wrapping_sub(pop_count);
 
         // Ordering:  Acquire ordering is required to synchronize with the
         // Release of the `head` atomic at the end of a stealing operation and
@@ -297,8 +292,8 @@ impl<T, B: Buffer<T>> Worker<T, B> {
         let mut pop_count_and_head = self.queue.pop_count_and_head.load(Relaxed);
         let push_count = self.queue.push_count.load(Relaxed);
 
-        let (pop_count, mut head) = unpack_counter_and_position(pop_count_and_head);
-        let tail = push_count.wrapping_sub(as_position(pop_count));
+        let (pop_count, mut head) = unpack(pop_count_and_head);
+        let tail = push_count.wrapping_sub(pop_count);
         let new_pop_count = pop_count.wrapping_add(1);
 
         loop {
@@ -306,7 +301,7 @@ impl<T, B: Buffer<T>> Worker<T, B> {
             if tail == head {
                 return None;
             }
-            let new_pop_count_and_head = pack_counter_and_position(new_pop_count, head);
+            let new_pop_count_and_head = pack(new_pop_count, head);
 
             // Attempt to claim this slot.
             //
@@ -324,7 +319,7 @@ impl<T, B: Buffer<T>> Worker<T, B> {
                 // We lost the race to a stealer or the CAS failed spuriously; try again.
                 Err(current) => {
                     pop_count_and_head = current;
-                    head = unpack_counter_and_position(current).1;
+                    head = unpack(current).1;
                 }
             }
         }
@@ -370,9 +365,8 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
         //
         // Ordering: see `Worker::push()` method.
         let dest_push_count = dest.queue.push_count.load(Relaxed);
-        let dest_pop_count =
-            unpack_counter_and_position(dest.queue.pop_count_and_head.load(Relaxed)).0;
-        let dest_tail = dest_push_count.wrapping_sub(as_position(dest_pop_count));
+        let dest_pop_count = unpack(dest.queue.pop_count_and_head.load(Relaxed)).0;
+        let dest_tail = dest_push_count.wrapping_sub(dest_pop_count);
         let dest_head = dest.queue.head.load(Acquire);
         let dest_free_capacity = BDest::CAPACITY - dest_tail.wrapping_sub(dest_head);
         let (old_head, new_head, transfer_count) = self.book_items(count_fn, dest_free_capacity)?;
@@ -440,9 +434,8 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
         //
         // Ordering: see `Worker::push()` method.
         let dest_push_count = dest.queue.push_count.load(Relaxed);
-        let dest_pop_count =
-            unpack_counter_and_position(dest.queue.pop_count_and_head.load(Relaxed)).0;
-        let dest_tail = dest_push_count.wrapping_sub(as_position(dest_pop_count));
+        let dest_pop_count = unpack(dest.queue.pop_count_and_head.load(Relaxed)).0;
+        let dest_tail = dest_push_count.wrapping_sub(dest_pop_count);
         let dest_head = dest.queue.head.load(Acquire);
         let dest_free_capacity = BDest::CAPACITY - dest_tail.wrapping_sub(dest_head);
 
@@ -530,7 +523,7 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
         let old_head = self.queue.head.load(Acquire);
 
         loop {
-            let (pop_count, head) = unpack_counter_and_position(pop_count_and_head);
+            let (pop_count, head) = unpack(pop_count_and_head);
 
             // Bail out if both heads differ because it means another stealing
             // operation is concurrently ongoing.
@@ -541,7 +534,7 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
             // Ordering: Acquire synchronizes with the Release in the push
             // method and ensure that all items pushed to the queue are visible.
             let push_count = self.queue.push_count.load(Acquire);
-            let tail = push_count.wrapping_sub(as_position(pop_count));
+            let tail = push_count.wrapping_sub(pop_count);
 
             // Note: it is possible for the computed item_count to be spuriously
             // greater than the number of available items if, in this iteration
@@ -571,7 +564,7 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
             }
 
             let new_head = head.wrapping_add(count);
-            let new_pop_count_and_head = pack_counter_and_position(pop_count, new_head);
+            let new_pop_count_and_head = pack(pop_count, new_head);
 
             // Attempt to book the slots. Only one stealer can succeed since
             // once this atomic is changed, the other thread will necessarily
@@ -610,24 +603,15 @@ unsafe impl<T: Send, B: Buffer<T>> Send for Stealer<T, B> {}
 unsafe impl<T: Send, B: Buffer<T>> Sync for Stealer<T, B> {}
 
 #[inline]
-/// Pack a buffer position in the least significant bits with a counter in the
-/// most significant bits.
-fn pack_counter_and_position(counter: UnsignedLong, position: UnsignedShort) -> UnsignedLong {
-    (counter << UnsignedShort::BITS) | position as UnsignedLong
+/// Pack two short integers into a long one.
+fn pack(value1: UnsignedShort, value2: UnsignedShort) -> UnsignedLong {
+    ((value1 as UnsignedLong) << UnsignedShort::BITS) | value2 as UnsignedLong
 }
 #[inline]
-/// Extract a buffer position from the least significant bits and a counter from
-/// the most significant bits.
-fn unpack_counter_and_position(
-    counter_and_position: UnsignedLong,
-) -> (UnsignedLong, UnsignedShort) {
+/// Unpack a long integer into 2 short ones.
+fn unpack(value: UnsignedLong) -> (UnsignedShort, UnsignedShort) {
     (
-        counter_and_position >> UnsignedShort::BITS,
-        counter_and_position as UnsignedShort,
+        (value >> UnsignedShort::BITS) as UnsignedShort,
+        value as UnsignedShort,
     )
-}
-#[inline]
-/// Extract the position from a counter.
-fn as_position(counter: UnsignedLong) -> UnsignedShort {
-    counter as UnsignedShort
 }

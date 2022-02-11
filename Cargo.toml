@@ -1,6 +1,11 @@
 [package]
 name = "st3"
-version = "0.1.0"
+# When incrementing version and releasing to crates.io:
+# - Update crate version in README.md (2 positions)
+# - Update CHANGELOG.md
+# - Update if necessary copyright notice in LICENSE-MIT
+# - Create a "vX.Y.Z" git tag
+version = "0.1.1"
 authors = ["Serge Barral <serge.barral@asynchronics.com>"]
 edition = "2021"
 rust-version = "1.56"

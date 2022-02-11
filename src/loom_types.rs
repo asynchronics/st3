@@ -2,28 +2,22 @@
 #[allow(unused_imports)]
 pub(crate) mod sync {
     pub(crate) mod atomic {
-        #[cfg(any(target_pointer_width = "64", feature = "long_counter"))]
-        pub(crate) use loom::sync::atomic::AtomicU16;
         #[cfg(not(any(target_pointer_width = "64", feature = "long_counter")))]
+        pub(crate) use loom::sync::atomic::AtomicU16;
         pub(crate) use loom::sync::atomic::AtomicU32;
         #[cfg(any(target_pointer_width = "64", feature = "long_counter"))]
         pub(crate) use loom::sync::atomic::AtomicU64;
-        #[cfg(not(any(target_pointer_width = "64", feature = "long_counter")))]
-        pub(crate) use loom::sync::atomic::AtomicU8;
     }
 }
 #[cfg(not(st3_loom))]
 #[allow(unused_imports)]
 pub(crate) mod sync {
     pub(crate) mod atomic {
-        #[cfg(any(target_pointer_width = "64", feature = "long_counter"))]
-        pub(crate) use std::sync::atomic::AtomicU16;
         #[cfg(not(any(target_pointer_width = "64", feature = "long_counter")))]
+        pub(crate) use std::sync::atomic::AtomicU16;
         pub(crate) use std::sync::atomic::AtomicU32;
         #[cfg(any(target_pointer_width = "64", feature = "long_counter"))]
         pub(crate) use std::sync::atomic::AtomicU64;
-        #[cfg(not(any(target_pointer_width = "64", feature = "long_counter")))]
-        pub(crate) use std::sync::atomic::AtomicU8;
     }
 }
 

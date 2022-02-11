@@ -76,10 +76,11 @@ macro_rules! make_buffer {
     };
 }
 
-// If the `long_counter` feature is activated, buffer positions are stored in
-// 16-bit integers which enables buffer capacities up to 2^15 (1 bit is required
-// for disambiguation between full and empty buffer). Otherwise the position is
-// stored in 8-bit integers and only capacities up to 2^7 are supported.
+// Define buffer capacities up to 2^15, which is the maximum that can be
+// supported when the `long_counter` feature is disabled since buffer positions
+// are then 16-bit wide (note that 1 bit is required for disambiguation between
+// full and empty buffer). We could possibly define capacities up to 2^31 when
+// `long_counter` is enabled, but this is probably enough in practice.
 make_buffer!(B2, 2);
 make_buffer!(B4, 4);
 make_buffer!(B8, 8);
@@ -87,21 +88,13 @@ make_buffer!(B16, 16);
 make_buffer!(B32, 32);
 make_buffer!(B64, 64);
 make_buffer!(B128, 128);
-#[cfg(feature = "long_counter")]
 make_buffer!(B256, 256);
-#[cfg(feature = "long_counter")]
 make_buffer!(B512, 512);
-#[cfg(feature = "long_counter")]
 make_buffer!(B1024, 1024);
-#[cfg(feature = "long_counter")]
 make_buffer!(B2048, 2048);
-#[cfg(feature = "long_counter")]
 make_buffer!(B4096, 4096);
-#[cfg(feature = "long_counter")]
 make_buffer!(B8192, 8192);
-#[cfg(feature = "long_counter")]
 make_buffer!(B16384, 12384);
-#[cfg(feature = "long_counter")]
 make_buffer!(B32768, 32768);
 
 /// Prevent public implementation of Buffer.

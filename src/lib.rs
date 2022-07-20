@@ -57,6 +57,7 @@ mod config;
 mod loom_types;
 
 use std::fmt;
+use std::iter::FusedIterator;
 use std::marker::PhantomData;
 use std::mem::{drop, MaybeUninit};
 use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -687,6 +688,8 @@ impl<'a, T, B: Buffer<T>> Iterator for Drain<'a, T, B> {
 }
 
 impl<'a, T, B: Buffer<T>> ExactSizeIterator for Drain<'a, T, B> {}
+
+impl<'a, T, B: Buffer<T>> FusedIterator for Drain<'a, T, B> {}
 
 impl<'a, T, B: Buffer<T>> Drop for Drain<'a, T, B> {
     fn drop(&mut self) {

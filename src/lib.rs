@@ -65,7 +65,7 @@ use std::sync::Arc;
 
 use cache_padded::CachePadded;
 
-use config::{AtomicLongUnsigned, AtomicShortUnsigned, UnsignedLong, UnsignedShort};
+use config::{AtomicUnsignedLong, AtomicUnsignedShort, UnsignedLong, UnsignedShort};
 use loom_types::cell::UnsafeCell;
 
 /// Handle for single-threaded LIFO push and pop operations.
@@ -115,17 +115,17 @@ impl fmt::Display for StealError {
 #[derive(Debug)]
 struct Queue<T, B: Buffer<T>> {
     /// Total number of push operations.
-    push_count: CachePadded<AtomicShortUnsigned>,
+    push_count: CachePadded<AtomicUnsignedShort>,
 
     /// Total number of pop operations, packed together with the position of the
     /// head that a stealer will set once stealing is complete. This head
     /// position always coincides with the `head` field below if the last
     /// stealing operation has completed.
-    pop_count_and_head: CachePadded<AtomicLongUnsigned>,
+    pop_count_and_head: CachePadded<AtomicUnsignedLong>,
 
     /// Position of the queue head, updated after completion of each stealing
     /// operation.
-    head: CachePadded<AtomicShortUnsigned>,
+    head: CachePadded<AtomicUnsignedShort>,
 
     /// Queue items.
     buffer: Box<B::Data>,
@@ -192,9 +192,9 @@ impl<T, B: Buffer<T>> Worker<T, B> {
     /// Creates a new queue and returns a `Worker` handle.
     pub fn new() -> Self {
         let queue = Arc::new(Queue {
-            push_count: CachePadded::new(AtomicShortUnsigned::new(0)),
-            pop_count_and_head: CachePadded::new(AtomicLongUnsigned::new(0)),
-            head: CachePadded::new(AtomicShortUnsigned::new(0)),
+            push_count: CachePadded::new(AtomicUnsignedShort::new(0)),
+            pop_count_and_head: CachePadded::new(AtomicUnsignedLong::new(0)),
+            head: CachePadded::new(AtomicUnsignedShort::new(0)),
             buffer: B::allocate(),
             _phantom: PhantomData,
         });
@@ -399,7 +399,7 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
     }
 
     /// Attempts to steal items from the head of the queue, returning one of
-    /// them directly and moving the others to the tail of another queue, .
+    /// them directly and moving the others to the tail of another queue.
     ///
     /// Up to `N` items are stolen (including the one returned directly), where
     /// `N` is specified by a closure which takes as argument the total count of
@@ -471,6 +471,43 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
         self.queue.head.store(new_head, Release);
 
         Ok((last_item, transfer_count as usize))
+    }
+
+    /// Returns an iterator that steals items from the head of the queue.
+    ///
+    /// The returned iterator steals up to `N` items, where `N` is specified by
+    /// a closure which takes as argument the total count of items available for
+    /// stealing. Upon success, the number of items ultimately stolen can be
+    /// from 1 to `N`, depending on the number of available items.
+    ///
+    /// # Beware
+    ///
+    /// All items stolen by the iterator should be moved out as soon as
+    /// possible, because until then or until the iterator is dropped, all
+    /// concurrent stealing operations will fail with [`StealError::Busy`].
+    ///
+    /// # Leaking
+    ///
+    /// If the iterator is leaked before all stolen items have been moved out,
+    /// subsequent stealing operations will permanently fail with
+    /// [`StealError::Busy`].
+    ///
+    /// # Errors
+    ///
+    /// An error is returned in the following cases:
+    /// 1) no item was stolen, either because the queue is empty or `N` is 0,
+    /// 2) a concurrent stealing operation is ongoing.
+    pub fn drain<C>(&self, count_fn: C) -> Result<Drain<'_, T, B>, StealError>
+    where
+        C: FnMut(usize) -> usize,
+    {
+        let (old_head, new_head, _) = self.book_items(count_fn, UnsignedShort::MAX)?;
+
+        Ok(Drain {
+            queue: &self.queue,
+            current: old_head,
+            end: new_head,
+        })
     }
 
     /// Attempt to book `N` items for stealing where `N` is specified by a
@@ -601,6 +638,68 @@ impl<T, B: Buffer<T>> UnwindSafe for Stealer<T, B> {}
 impl<T, B: Buffer<T>> RefUnwindSafe for Stealer<T, B> {}
 unsafe impl<T: Send, B: Buffer<T>> Send for Stealer<T, B> {}
 unsafe impl<T: Send, B: Buffer<T>> Sync for Stealer<T, B> {}
+
+/// A draining iterator for [`Stealer<T, B>`].
+///
+/// This iterator is created by [`Stealer::drain`]. See its documentation for
+/// more.
+#[derive(Debug)]
+pub struct Drain<'a, T, B: Buffer<T>> {
+    queue: &'a Queue<T, B>,
+    current: UnsignedShort,
+    end: UnsignedShort,
+}
+
+impl<'a, T, B: Buffer<T>> Iterator for Drain<'a, T, B> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        if self.current == self.end {
+            return None;
+        }
+
+        let item = Some(unsafe { self.queue.read_at(self.current) });
+
+        self.current = self.current.wrapping_add(1);
+
+        // We cannot rely on the caller to call `next` again after the last item
+        // is yielded so the head position must be updated immediately when
+        // yielding the last item.
+        if self.current == self.end {
+            // Update the head position.
+            //
+            // Ordering: the Release ordering ensures that all items have been moved
+            // out when a subsequent push operation synchronizes by acquiring
+            // `head`. It also ensures that the push count seen by a subsequent
+            // steal operation (which acquires `head`) is at least equal to the one
+            // seen by the present steal operation.
+            self.queue.head.store(self.end, Release);
+        }
+
+        item
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let sz = self.end.wrapping_sub(self.current) as usize;
+
+        (sz, Some(sz))
+    }
+}
+
+impl<'a, T, B: Buffer<T>> ExactSizeIterator for Drain<'a, T, B> {}
+
+impl<'a, T, B: Buffer<T>> Drop for Drain<'a, T, B> {
+    fn drop(&mut self) {
+        // Drop all items and make sure the head is updated so that subsequent
+        // stealing operations can succeed.
+        for _item in self {}
+    }
+}
+
+impl<'a, T, B: Buffer<T>> UnwindSafe for Drain<'a, T, B> {}
+impl<'a, T, B: Buffer<T>> RefUnwindSafe for Drain<'a, T, B> {}
+unsafe impl<'a, T: Send, B: Buffer<T>> Send for Drain<'a, T, B> {}
+unsafe impl<'a, T: Send, B: Buffer<T>> Sync for Drain<'a, T, B> {}
 
 #[inline]
 /// Pack two short integers into a long one.

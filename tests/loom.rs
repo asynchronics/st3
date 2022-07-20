@@ -4,7 +4,7 @@ use st3::{Stealer, Worker};
 
 // Test adapted from the Tokio test suite.
 #[test]
-fn loom_basic() {
+fn loom_basic_steal() {
     loom::model(|| {
         let worker = Worker::<usize, st3::B4>::new();
         let stealer = worker.stealer();
@@ -16,6 +16,54 @@ fn loom_basic() {
             for _ in 0..3 {
                 let _ = stealer.steal(&dest_worker, |n| n - n / 2);
                 while dest_worker.pop().is_some() {
+                    n += 1;
+                }
+            }
+
+            n
+        });
+
+        let mut n = 0;
+
+        for _ in 0..2 {
+            for _ in 0..2 {
+                if worker.push(42).is_err() {
+                    n += 1;
+                }
+            }
+
+            if worker.pop().is_some() {
+                n += 1;
+            }
+
+            // Push another task
+            if worker.push(42).is_err() {
+                n += 1;
+            }
+
+            while worker.pop().is_some() {
+                n += 1;
+            }
+        }
+
+        n += th.join().unwrap();
+
+        assert_eq!(6, n);
+    });
+}
+
+// Test adapted from the Tokio test suite.
+#[test]
+fn loom_basic_drain() {
+    loom::model(|| {
+        let worker = Worker::<usize, st3::B4>::new();
+        let stealer = worker.stealer();
+
+        let th = thread::spawn(move || {
+            let mut n = 0;
+
+            for _ in 0..3 {
+                for _ in stealer.drain(|n| n - n / 2) {
                     n += 1;
                 }
             }

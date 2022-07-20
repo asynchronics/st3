@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::spawn;
 
-use st3::{Buffer, Stealer, Worker};
+use st3::{Buffer, StealError, Stealer, Worker};
 
 // Rotate the internal ring buffer indices by `n`.
 fn rotate<T: Default + std::fmt::Debug, B: Buffer<T>>(worker: &Worker<T, B>, n: usize) {
@@ -29,12 +29,12 @@ fn single_threaded_steal() {
         worker1.push(3).unwrap();
         worker1.push(4).unwrap();
 
-        assert!(worker1.pop() == Some(4));
-        assert!(stealer1.steal_and_pop(&worker2, |_| 2) == Ok((2, 1)));
-        assert!(worker1.pop() == Some(3));
-        assert!(worker1.pop() == None);
-        assert!(worker2.pop() == Some(1));
-        assert!(worker2.pop() == None);
+        assert_eq!(worker1.pop(), Some(4));
+        assert_eq!(stealer1.steal_and_pop(&worker2, |_| 2), Ok((2, 1)));
+        assert_eq!(worker1.pop(), Some(3));
+        assert_eq!(worker1.pop(), None);
+        assert_eq!(worker2.pop(), Some(1));
+        assert_eq!(worker2.pop(), None);
     }
 }
 
@@ -50,11 +50,42 @@ fn self_steal() {
         worker.push(3).unwrap();
         worker.push(4).unwrap();
 
-        assert!(worker.pop() == Some(4));
-        assert!(stealer.steal_and_pop(&worker, |_| 2) == Ok((2, 1)));
-        assert!(worker.pop() == Some(1));
-        assert!(worker.pop() == Some(3));
-        assert!(worker.pop() == None);
+        assert_eq!(worker.pop(), Some(4));
+        assert_eq!(stealer.steal_and_pop(&worker, |_| 2), Ok((2, 1)));
+        assert_eq!(worker.pop(), Some(1));
+        assert_eq!(worker.pop(), Some(3));
+        assert_eq!(worker.pop(), None);
+    }
+}
+
+#[test]
+fn drain_steal() {
+    for rotation in [0, 255, 256, 257, 65535, 65536, 65537] {
+        let worker = Worker::<_, st3::B128>::new();
+        let dummy_worker = Worker::<_, st3::B128>::new();
+        let stealer1 = worker.stealer();
+        let stealer2 = worker.stealer();
+        rotate(&worker, rotation);
+
+        worker.push(1).unwrap();
+        worker.push(2).unwrap();
+        worker.push(3).unwrap();
+        worker.push(4).unwrap();
+
+        assert_eq!(worker.pop(), Some(4));
+        let mut iter = stealer1.drain(|n| n - 1).unwrap();
+        assert_eq!(
+            stealer2.steal_and_pop(&dummy_worker, |_| 1),
+            Err(StealError::Busy)
+        );
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(
+            stealer2.steal_and_pop(&dummy_worker, |_| 1),
+            Err(StealError::Busy)
+        );
+        assert_eq!(iter.next(), Some(2));
+        assert_eq!(stealer2.steal_and_pop(&dummy_worker, |_| 1), Ok((3, 0)));
+        assert_eq!(iter.next(), None);
     }
 }
 

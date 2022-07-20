@@ -41,7 +41,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-st3 = "0.1.1"
+st3 = "0.2.0"
 ```
 
 
@@ -171,7 +171,7 @@ buffer positions on those targets:
 
 ```toml
 [dependencies]
-st3 = { version = "0.1.1", default-features = false }
+st3 = { version = "0.2.0", default-features = false }
 ```
 
 Note that disabling this feature has no effect on 64-bit targets: those will

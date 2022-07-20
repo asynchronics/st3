@@ -17,6 +17,6 @@ pub(crate) type UnsignedShort = u16;
 #[cfg(not(any(target_pointer_width = "64", feature = "long_counter")))]
 pub(crate) type UnsignedLong = u32;
 #[cfg(not(any(target_pointer_width = "64", feature = "long_counter")))]
-pub(crate) type AtomicShortUnsigned = atomic::AtomicU16;
+pub(crate) type AtomicUnsignedShort = atomic::AtomicU16;
 #[cfg(not(any(target_pointer_width = "64", feature = "long_counter")))]
-pub(crate) type AtomicLongUnsigned = atomic::AtomicU32;
+pub(crate) type AtomicUnsignedLong = atomic::AtomicU32;

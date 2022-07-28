@@ -69,41 +69,11 @@ use cache_padded::CachePadded;
 use config::{AtomicUnsignedLong, AtomicUnsignedShort, UnsignedLong, UnsignedShort};
 use loom_types::cell::UnsafeCell;
 
-/// Handle for single-threaded LIFO push and pop operations.
-#[derive(Debug)]
-pub struct Worker<T, B: Buffer<T>> {
-    queue: Arc<Queue<T, B>>,
-}
-
-/// Handle for multi-threaded FIFO stealing operations.
-#[derive(Debug)]
-pub struct Stealer<T, B: Buffer<T>> {
-    queue: Arc<Queue<T, B>>,
-}
-
-/// Error returned when stealing is unsuccessful.
-#[derive(Debug, Clone, PartialEq)]
-pub enum StealError {
-    /// No item was stolen.
-    Empty,
-    /// Another concurrent stealing operation is ongoing.
-    Busy,
-}
-
-impl fmt::Display for StealError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            StealError::Empty => write!(f, "cannot steal from empty queue"),
-            StealError::Busy => write!(f, "a concurrent steal operation is ongoing"),
-        }
-    }
-}
-
 /// A double-ended queue.
 ///
 /// The queue tracks its tail and head position within a ring buffer with
 /// wrap-around integers, where the least significant bits specify the actual
-/// buffer index. All positions have bit width that are intentionally larger
+/// buffer index. All positions have bit widths that are intentionally larger
 /// than necessary for buffer indexing because:
 /// - an extra bit is needed to disambiguate between empty and full buffers when
 ///   the start and end position of the buffer are equal,
@@ -173,6 +143,121 @@ impl<T, B: Buffer<T>> Queue<T, B> {
         let index = (position & B::MASK) as usize;
         (*self.buffer).as_ref()[index].with_mut(|slot| slot.write(MaybeUninit::new(item)));
     }
+
+    /// Attempt to book `N` items for stealing where `N` is specified by a
+    /// closure which takes as argument the total count of available items.
+    ///
+    /// In case of success, the returned triplet is the *current* head, the
+    /// *next* head and an item count at least equal to 1.
+    ///
+    /// # Errors
+    ///
+    /// An error is returned in the following cases:
+    /// 1) no item could be stolen, either because the queue is empty or because
+    ///    `N` is 0,
+    /// 2) a concurrent stealing operation is ongoing.
+    ///
+    /// # Safety
+    ///
+    /// This function is not strictly unsafe, but because it initiates the
+    /// stealing operation by modifying the post-stealing head in
+    /// `push_count_and_head` without ever updating the `head` atomic variable,
+    /// its misuse can result in permanently blocking subsequent stealing
+    /// operations.
+    fn book_items<C>(
+        &self,
+        mut count_fn: C,
+        max_count: UnsignedShort,
+    ) -> Result<(UnsignedShort, UnsignedShort, UnsignedShort), StealError>
+    where
+        C: FnMut(usize) -> usize,
+    {
+        // Ordering: Acquire on the `pop_count_and_head` load synchronizes with
+        // the release at the end of a previous pop operation. It is therefore
+        // warranted that the push count loaded later is at least the same as it
+        // was when the pop count was set, ensuring in turn that the computed
+        // tail is not less than the head and therefore the item count does not
+        // wrap around. For the same reason, the failure ordering on the CAS is
+        // also Acquire since the push count is loaded again at every CAS
+        // iteration.
+        let mut pop_count_and_head = self.pop_count_and_head.load(Acquire);
+
+        // Ordering: Acquire on the `head` load synchronizes with a release at
+        // the end of a previous steal operation. Once this head is confirmed
+        // equal to the head in `pop_count_and_head`, it is therefore warranted
+        // that the push count loaded later is at least the same as it was on
+        // the last completed steal operation, ensuring in turn that the
+        // computed tail is not less than the head and therefore the item count
+        // does not wrap around. Alternatively, the ordering could be Relaxed if
+        // the success ordering on the CAS was AcqRel, which would achieve the
+        // same by synchronizing with the head field of `pop_count_and_head`.
+        let old_head = self.head.load(Acquire);
+
+        loop {
+            let (pop_count, head) = unpack(pop_count_and_head);
+
+            // Bail out if both heads differ because it means another stealing
+            // operation is concurrently ongoing.
+            if old_head != head {
+                return Err(StealError::Busy);
+            }
+
+            // Ordering: Acquire synchronizes with the Release in the push
+            // method and ensure that all items pushed to the queue are visible.
+            let push_count = self.push_count.load(Acquire);
+            let tail = push_count.wrapping_sub(pop_count);
+
+            // Note: it is possible for the computed item_count to be spuriously
+            // greater than the number of available items if, in this iteration
+            // of the CAS loop, `pop_count_and_head` and `head` are both
+            // obsolete. This is not an issue, however, since the CAS will then
+            // fail due to `pop_count_and_head` being obsolete.
+            let item_count = tail.wrapping_sub(head);
+
+            // `item_count` is tested now because `count_fn` may expect
+            // `item_count>0`.
+            if item_count == 0 {
+                return Err(StealError::Empty);
+            }
+
+            // Unwind safety: it is OK if `count_fn` panics because no state has
+            // been modified yet.
+            let count = (count_fn(item_count as usize).min(max_count as usize) as UnsignedShort)
+                .min(item_count);
+
+            // The special case `count_fn() == 0` must be tested specifically,
+            // because if the compare-exchange succeeds with `count=0`, the new
+            // value will be the same as the old one so other stealers will not
+            // detect that stealing is currently ongoing and may try to actually
+            // steal items and concurrently modify the position of the head.
+            if count == 0 {
+                return Err(StealError::Empty);
+            }
+
+            let new_head = head.wrapping_add(count);
+            let new_pop_count_and_head = pack(pop_count, new_head);
+
+            // Attempt to book the slots. Only one stealer can succeed since
+            // once this atomic is changed, the other thread will necessarily
+            // observe a mismatch between `head` and the head sub-field of
+            // `pop_count_and_head`.
+            //
+            // Ordering: see justification for Acquire on failure in the first
+            // load of `pop_count_and_head`. No further synchronization is
+            // necessary on success.
+            match self.pop_count_and_head.compare_exchange_weak(
+                pop_count_and_head,
+                new_pop_count_and_head,
+                Acquire,
+                Acquire,
+            ) {
+                Ok(_) => return Ok((head, new_head, count)),
+                // We lost the race to a concurrent pop or steal operation, or
+                // the CAS failed spuriously; try again.
+                Err(current) => pop_count_and_head = current,
+            }
+        }
+    }
 }
 
 impl<T, B: Buffer<T>> Drop for Queue<T, B> {
@@ -187,6 +272,12 @@ impl<T, B: Buffer<T>> Drop for Queue<T, B> {
             drop(unsafe { self.read_at(head.wrapping_add(offset)) });
         }
     }
+}
+
+/// Handle for single-threaded LIFO push and pop operations.
+#[derive(Debug)]
+pub struct Worker<T, B: Buffer<T>> {
+    queue: Arc<Queue<T, B>>,
 }
 
 impl<T, B: Buffer<T>> Worker<T, B> {
@@ -213,33 +304,41 @@ impl<T, B: Buffer<T>> Worker<T, B> {
         }
     }
 
+    /// Returns the number of items that can be successfully pushed onto the
+    /// queue.
+    ///
+    /// Note that that the spare capacity may be underestimated due to
+    /// concurrent stealing operations.
+    pub fn spare_capacity(&self) -> usize {
+        let capacity = <B as Buffer<T>>::CAPACITY;
+
+        let push_count = self.queue.push_count.load(Relaxed);
+        let pop_count = unpack(self.queue.pop_count_and_head.load(Relaxed)).0;
+        let tail = push_count.wrapping_sub(pop_count);
+
+        // Ordering: Relaxed ordering is sufficient since no element will be
+        // read or written.
+        let head = self.queue.head.load(Relaxed);
+
+        // Aggregate count of available items (those which can be popped) and of
+        // items currently being stolen. Because the value of `head` may be
+        // stale, it is necessary to cap this value by the maximum capacity.
+        let len = tail.wrapping_sub(head).min(capacity);
+
+        (capacity - len) as usize
+    }
+
     /// Returns true if the queue is empty.
     ///
     /// Note that the queue size is somewhat ill-defined in a multi-threaded
-    /// context, but if `is_empty()` returns true, it is guaranteed that a next
-    /// call to `pop()` will fail.
+    /// context, but it is warranted that if `is_empty()` returns true, a
+    /// subsequent call to `pop()` will fail.
     pub fn is_empty(&self) -> bool {
         let push_count = self.queue.push_count.load(Relaxed);
         let (pop_count, head) = unpack(self.queue.pop_count_and_head.load(Relaxed));
         let tail = push_count.wrapping_sub(pop_count);
 
         tail == head
-    }
-
-    /// Returns the number of elements in the queue.
-    ///
-    /// Note that the queue size is somewhat ill-defined in a multi-threaded
-    /// context, but it is warranted that at most `len()` subsequent calls to
-    /// `pop()` can succeed. No expectations should be placed on `push()` being
-    /// successful based on the value of `len()` because if there is an ongoing
-    /// stealing operation, the capacity to be freed may be accounted for by
-    /// `len()` before the stealing operation completes.
-    pub fn len(&self) -> usize {
-        let push_count = self.queue.push_count.load(Relaxed);
-        let (pop_count, head) = unpack(self.queue.pop_count_and_head.load(Relaxed));
-        let tail = push_count.wrapping_sub(pop_count);
-
-        tail.wrapping_sub(head) as usize
     }
 
     /// Attempts to push one item at the tail of the queue.
@@ -253,7 +352,7 @@ impl<T, B: Buffer<T>> Worker<T, B> {
         let pop_count = unpack(self.queue.pop_count_and_head.load(Relaxed)).0;
         let tail = push_count.wrapping_sub(pop_count);
 
-        // Ordering:  Acquire ordering is required to synchronize with the
+        // Ordering: Acquire ordering is required to synchronize with the
         // Release of the `head` atomic at the end of a stealing operation and
         // ensure that the stealer has finished copying the items from the
         // buffer.
@@ -328,6 +427,43 @@ impl<T, B: Buffer<T>> Worker<T, B> {
         // Read the item.
         unsafe { Some(self.queue.read_at(tail.wrapping_sub(1))) }
     }
+
+    /// Returns an iterator that steals items from the head of the queue.
+    ///
+    /// The returned iterator steals up to `N` items, where `N` is specified by
+    /// a closure which takes as argument the total count of items available for
+    /// stealing. Upon success, the number of items ultimately stolen can be
+    /// from 1 to `N`, depending on the number of available items.
+    ///
+    /// # Beware
+    ///
+    /// All items stolen by the iterator should be moved out as soon as
+    /// possible, because until then or until the iterator is dropped, all
+    /// concurrent stealing operations will fail with [`StealError::Busy`].
+    ///
+    /// # Leaking
+    ///
+    /// If the iterator is leaked before all stolen items have been moved out,
+    /// subsequent stealing operations will permanently fail with
+    /// [`StealError::Busy`].
+    ///
+    /// # Errors
+    ///
+    /// An error is returned in the following cases:
+    /// 1) no item was stolen, either because the queue is empty or `N` is 0,
+    /// 2) a concurrent stealing operation is ongoing.
+    pub fn drain<C>(&self, count_fn: C) -> Result<Drain<'_, T, B>, StealError>
+    where
+        C: FnMut(usize) -> usize,
+    {
+        let (old_head, new_head, _) = self.queue.book_items(count_fn, UnsignedShort::MAX)?;
+
+        Ok(Drain {
+            queue: &self.queue,
+            current: old_head,
+            end: new_head,
+        })
+    }
 }
 
 impl<T, B: Buffer<T>> Default for Worker<T, B> {
@@ -339,6 +475,76 @@ impl<T, B: Buffer<T>> Default for Worker<T, B> {
 impl<T, B: Buffer<T>> UnwindSafe for Worker<T, B> {}
 impl<T, B: Buffer<T>> RefUnwindSafe for Worker<T, B> {}
 unsafe impl<T: Send, B: Buffer<T>> Send for Worker<T, B> {}
+
+/// A draining iterator for [`Worker<T, B>`].
+///
+/// This iterator is created by [`Worker::drain`]. See its documentation for
+/// more.
+#[derive(Debug)]
+pub struct Drain<'a, T, B: Buffer<T>> {
+    queue: &'a Queue<T, B>,
+    current: UnsignedShort,
+    end: UnsignedShort,
+}
+
+impl<'a, T, B: Buffer<T>> Iterator for Drain<'a, T, B> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        if self.current == self.end {
+            return None;
+        }
+
+        let item = Some(unsafe { self.queue.read_at(self.current) });
+
+        self.current = self.current.wrapping_add(1);
+
+        // We cannot rely on the caller to call `next` again after the last item
+        // is yielded so the head position must be updated immediately when
+        // yielding the last item.
+        if self.current == self.end {
+            // Update the head position.
+            //
+            // Ordering: the Release ordering ensures that all items have been moved
+            // out when a subsequent push operation synchronizes by acquiring
+            // `head`. It also ensures that the push count seen by a subsequent
+            // steal operation (which acquires `head`) is at least equal to the one
+            // seen by the present steal operation.
+            self.queue.head.store(self.end, Release);
+        }
+
+        item
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let sz = self.end.wrapping_sub(self.current) as usize;
+
+        (sz, Some(sz))
+    }
+}
+
+impl<'a, T, B: Buffer<T>> ExactSizeIterator for Drain<'a, T, B> {}
+
+impl<'a, T, B: Buffer<T>> FusedIterator for Drain<'a, T, B> {}
+
+impl<'a, T, B: Buffer<T>> Drop for Drain<'a, T, B> {
+    fn drop(&mut self) {
+        // Drop all items and make sure the head is updated so that subsequent
+        // stealing operations can succeed.
+        for _item in self {}
+    }
+}
+
+impl<'a, T, B: Buffer<T>> UnwindSafe for Drain<'a, T, B> {}
+impl<'a, T, B: Buffer<T>> RefUnwindSafe for Drain<'a, T, B> {}
+unsafe impl<'a, T: Send, B: Buffer<T>> Send for Drain<'a, T, B> {}
+unsafe impl<'a, T: Send, B: Buffer<T>> Sync for Drain<'a, T, B> {}
+
+/// Handle for multi-threaded FIFO stealing operations.
+#[derive(Debug)]
+pub struct Stealer<T, B: Buffer<T>> {
+    queue: Arc<Queue<T, B>>,
+}
 
 impl<T, B: Buffer<T>> Stealer<T, B> {
     /// Attempts to steal items from the head of the queue and move them to the
@@ -370,7 +576,8 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
         let dest_tail = dest_push_count.wrapping_sub(dest_pop_count);
         let dest_head = dest.queue.head.load(Acquire);
         let dest_free_capacity = BDest::CAPACITY - dest_tail.wrapping_sub(dest_head);
-        let (old_head, new_head, transfer_count) = self.book_items(count_fn, dest_free_capacity)?;
+        let (old_head, new_head, transfer_count) =
+            self.queue.book_items(count_fn, dest_free_capacity)?;
 
         // Move all items but the last to the destination queue.
         for offset in 0..transfer_count {
@@ -440,7 +647,8 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
         let dest_head = dest.queue.head.load(Acquire);
         let dest_free_capacity = BDest::CAPACITY - dest_tail.wrapping_sub(dest_head);
 
-        let (old_head, new_head, count) = self.book_items(count_fn, dest_free_capacity + 1)?;
+        let (old_head, new_head, count) =
+            self.queue.book_items(count_fn, dest_free_capacity + 1)?;
         let transfer_count = count - 1;
         debug_assert!(transfer_count <= dest_free_capacity);
 
@@ -473,158 +681,6 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
 
         Ok((last_item, transfer_count as usize))
     }
-
-    /// Returns an iterator that steals items from the head of the queue.
-    ///
-    /// The returned iterator steals up to `N` items, where `N` is specified by
-    /// a closure which takes as argument the total count of items available for
-    /// stealing. Upon success, the number of items ultimately stolen can be
-    /// from 1 to `N`, depending on the number of available items.
-    ///
-    /// # Beware
-    ///
-    /// All items stolen by the iterator should be moved out as soon as
-    /// possible, because until then or until the iterator is dropped, all
-    /// concurrent stealing operations will fail with [`StealError::Busy`].
-    ///
-    /// # Leaking
-    ///
-    /// If the iterator is leaked before all stolen items have been moved out,
-    /// subsequent stealing operations will permanently fail with
-    /// [`StealError::Busy`].
-    ///
-    /// # Errors
-    ///
-    /// An error is returned in the following cases:
-    /// 1) no item was stolen, either because the queue is empty or `N` is 0,
-    /// 2) a concurrent stealing operation is ongoing.
-    pub fn drain<C>(&self, count_fn: C) -> Result<Drain<'_, T, B>, StealError>
-    where
-        C: FnMut(usize) -> usize,
-    {
-        let (old_head, new_head, _) = self.book_items(count_fn, UnsignedShort::MAX)?;
-
-        Ok(Drain {
-            queue: &self.queue,
-            current: old_head,
-            end: new_head,
-        })
-    }
-
-    /// Attempt to book `N` items for stealing where `N` is specified by a
-    /// closure which takes as argument the total count of available items.
-    ///
-    /// In case of success, the returned triplet is the *current* head, the
-    /// *next* head and an item count at least equal to 1.
-    ///
-    /// # Errors
-    ///
-    /// An error is returned in the following cases:
-    /// 1) no item could be stolen, either because the queue is empty or because
-    ///    `N` is 0,
-    /// 2) a concurrent stealing operation is ongoing.
-    ///
-    /// # Safety
-    ///
-    /// This function is not strictly unsafe, but because it initiates the
-    /// stealing operation by modifying the post-stealing head in
-    /// `push_count_and_head` without ever updating the `head` atomic variable,
-    /// its misuse can result in permanently blocking subsequent stealing
-    /// operations.
-    fn book_items<C>(
-        &self,
-        mut count_fn: C,
-        max_count: UnsignedShort,
-    ) -> Result<(UnsignedShort, UnsignedShort, UnsignedShort), StealError>
-    where
-        C: FnMut(usize) -> usize,
-    {
-        // Ordering: Acquire on the `pop_count_and_head` load synchronizes with
-        // the release at the end of a previous pop operation. It is therefore
-        // warranted that the push count loaded later is at least the same as it
-        // was when the pop count was set, ensuring in turn that the computed
-        // tail is not less than the head and therefore the item count does not
-        // wrap around. For the same reason, the failure ordering on the CAS is
-        // also Acquire since the push count is loaded again at every CAS
-        // iteration.
-        let mut pop_count_and_head = self.queue.pop_count_and_head.load(Acquire);
-
-        // Ordering: Acquire on the `head` load synchronizes with a release at
-        // the end of a previous steal operation. Once this head is confirmed
-        // equal to the head in `pop_count_and_head`, it is therefore warranted
-        // that the push count loaded later is at least the same as it was on
-        // the last completed steal operation, ensuring in turn that the
-        // computed tail is not less than the head and therefore the item count
-        // does not wrap around. Alternatively, the ordering could be Relaxed if
-        // the success ordering on the CAS was AcqRel, which would achieve the
-        // same by synchronizing with the head field of `pop_count_and_head`.
-        let old_head = self.queue.head.load(Acquire);
-
-        loop {
-            let (pop_count, head) = unpack(pop_count_and_head);
-
-            // Bail out if both heads differ because it means another stealing
-            // operation is concurrently ongoing.
-            if old_head != head {
-                return Err(StealError::Busy);
-            }
-
-            // Ordering: Acquire synchronizes with the Release in the push
-            // method and ensure that all items pushed to the queue are visible.
-            let push_count = self.queue.push_count.load(Acquire);
-            let tail = push_count.wrapping_sub(pop_count);
-
-            // Note: it is possible for the computed item_count to be spuriously
-            // greater than the number of available items if, in this iteration
-            // of the CAS loop, `pop_count_and_head` and `head` are both
-            // obsolete. This is not an issue, however, since the CAS will then
-            // fail due to `pop_count_and_head` being obsolete.
-            let item_count = tail.wrapping_sub(head);
-
-            // `item_count` is tested now because `count_fn` may expect
-            // `item_count>0`.
-            if item_count == 0 {
-                return Err(StealError::Empty);
-            }
-
-            // Unwind safety: it is OK if `count_fn` panics because no state has
-            // been modified yet.
-            let count = (count_fn(item_count as usize).min(max_count as usize) as UnsignedShort)
-                .min(item_count);
-
-            // The special case `count_fn() == 0` must be tested specifically,
-            // because if the compare-exchange succeeds with `count=0`, the new
-            // value will be the same as the old one so other stealers will not
-            // detect that stealing is currently ongoing and may try to actually
-            // steal items and concurrently modify the position of the head.
-            if count == 0 {
-                return Err(StealError::Empty);
-            }
-
-            let new_head = head.wrapping_add(count);
-            let new_pop_count_and_head = pack(pop_count, new_head);
-
-            // Attempt to book the slots. Only one stealer can succeed since
-            // once this atomic is changed, the other thread will necessarily
-            // observe a mismatch between `head` and the head sub-field of
-            // `pop_count_and_head`.
-            //
-            // Ordering: see justification for Acquire on failure in the first
-            // load of `pop_count_and_head`. No further synchronization is
-            // necessary on success.
-            match self.queue.pop_count_and_head.compare_exchange_weak(
-                pop_count_and_head,
-                new_pop_count_and_head,
-                Acquire,
-                Acquire,
-            ) {
-                Ok(_) => return Ok((head, new_head, count)),
-                // We lost the race to a concurrent pop or steal operation, or
-                // the CAS failed spuriously; try again.
-                Err(current) => pop_count_and_head = current,
-            }
-        }
-    }
 }
 
 impl<T, B: Buffer<T>> Clone for Stealer<T, B> {
@@ -640,69 +696,23 @@ impl<T, B: Buffer<T>> RefUnwindSafe for Stealer<T, B> {}
 unsafe impl<T: Send, B: Buffer<T>> Send for Stealer<T, B> {}
 unsafe impl<T: Send, B: Buffer<T>> Sync for Stealer<T, B> {}
 
-/// A draining iterator for [`Stealer<T, B>`].
-///
-/// This iterator is created by [`Stealer::drain`]. See its documentation for
-/// more.
-#[derive(Debug)]
-pub struct Drain<'a, T, B: Buffer<T>> {
-    queue: &'a Queue<T, B>,
-    current: UnsignedShort,
-    end: UnsignedShort,
+/// Error returned when stealing is unsuccessful.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StealError {
+    /// No item was stolen.
+    Empty,
+    /// Another concurrent stealing operation is ongoing.
+    Busy,
 }
 
-impl<'a, T, B: Buffer<T>> Iterator for Drain<'a, T, B> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<T> {
-        if self.current == self.end {
-            return None;
+impl fmt::Display for StealError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            StealError::Empty => write!(f, "cannot steal from empty queue"),
+            StealError::Busy => write!(f, "a concurrent steal operation is ongoing"),
         }
-
-        let item = Some(unsafe { self.queue.read_at(self.current) });
-
-        self.current = self.current.wrapping_add(1);
-
-        // We cannot rely on the caller to call `next` again after the last item
-        // is yielded so the head position must be updated immediately when
-        // yielding the last item.
-        if self.current == self.end {
-            // Update the head position.
-            //
-            // Ordering: the Release ordering ensures that all items have been moved
-            // out when a subsequent push operation synchronizes by acquiring
-            // `head`. It also ensures that the push count seen by a subsequent
-            // steal operation (which acquires `head`) is at least equal to the one
-            // seen by the present steal operation.
-            self.queue.head.store(self.end, Release);
-        }
-
-        item
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let sz = self.end.wrapping_sub(self.current) as usize;
-
-        (sz, Some(sz))
     }
 }
-
-impl<'a, T, B: Buffer<T>> ExactSizeIterator for Drain<'a, T, B> {}
-
-impl<'a, T, B: Buffer<T>> FusedIterator for Drain<'a, T, B> {}
-
-impl<'a, T, B: Buffer<T>> Drop for Drain<'a, T, B> {
-    fn drop(&mut self) {
-        // Drop all items and make sure the head is updated so that subsequent
-        // stealing operations can succeed.
-        for _item in self {}
-    }
-}
-
-impl<'a, T, B: Buffer<T>> UnwindSafe for Drain<'a, T, B> {}
-impl<'a, T, B: Buffer<T>> RefUnwindSafe for Drain<'a, T, B> {}
-unsafe impl<'a, T: Send, B: Buffer<T>> Send for Drain<'a, T, B> {}
-unsafe impl<'a, T: Send, B: Buffer<T>> Sync for Drain<'a, T, B> {}
 
 #[inline]
 /// Pack two short integers into a long one.

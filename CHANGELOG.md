@@ -1,3 +1,13 @@
+# 0.3.0 (????-??-??)
+
+- Implement FusedIterator for the Drain iterator.
+- Add a `Worker::spare_capacity` method.
+- BREAKING CHANGE: remove `Worker::len` as it was not very useful due to its
+  weak guaranties.
+- BREAKING CHANGE: move the `drain` method to the worker rather than the
+  stealer, as it is mostly useful to move items back into an injection queue on
+  overflow.
+
 # 0.2.0 (2022-07-20)
 
 - Add a drain iterator to efficiently steal batches of items into custom

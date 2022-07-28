@@ -52,51 +52,50 @@ fn loom_basic_steal() {
     });
 }
 
-// Test adapted from the Tokio test suite.
+// Simultaneously drain, pop and steal items.
 #[test]
-fn loom_basic_drain() {
+fn loom_drain_and_pop() {
     loom::model(|| {
         let worker = Worker::<usize, st3::B4>::new();
         let stealer = worker.stealer();
 
         let th = thread::spawn(move || {
-            let mut n = 0;
+            let dest_worker = Worker::<usize, st3::B4>::new();
+            let mut n_pop = 0;
 
-            for _ in 0..3 {
-                for _ in stealer.drain(|n| n - n / 2) {
-                    n += 1;
-                }
+            let _ = stealer.steal(&dest_worker, |n| n - n / 2);
+            while dest_worker.pop().is_some() {
+                n_pop += 1;
             }
 
-            n
+            n_pop
         });
 
-        let mut n = 0;
+        let mut n_pop = 0;
+        let mut n_push = 0;
 
-        for _ in 0..2 {
-            for _ in 0..2 {
-                if worker.push(42).is_err() {
-                    n += 1;
-                }
-            }
-
-            if worker.pop().is_some() {
-                n += 1;
-            }
-
-            // Push another task
-            if worker.push(42).is_err() {
-                n += 1;
-            }
-
-            while worker.pop().is_some() {
-                n += 1;
+        for _ in 0..6 {
+            if worker.push(42).is_ok() {
+                n_push += 1;
             }
         }
 
-        n += th.join().unwrap();
+        if let Ok(drain_iter) = worker.drain(|n| n - n / 2) {
+            for _ in drain_iter {
+                n_pop += 1;
+                if worker.pop().is_some() {
+                    n_pop += 1;
+                }
+            }
+        }
 
-        assert_eq!(6, n);
+        while worker.pop().is_some() {
+            n_pop += 1;
+        }
+
+        n_pop += th.join().unwrap();
+
+        assert_eq!(n_push, n_pop);
     });
 }
 
@@ -151,7 +150,7 @@ fn loom_steal_overflow() {
 fn loom_multi_stealer() {
     const NUM_TASKS: usize = 5;
 
-    fn steal_tasks(stealer: Stealer<usize, st3::B4>) -> usize {
+    fn steal_half(stealer: Stealer<usize, st3::B4>) -> usize {
         let dest_worker = Worker::<usize, st3::B4>::new();
 
         let _ = stealer.steal(&dest_worker, |n| n - n / 2);
@@ -169,8 +168,8 @@ fn loom_multi_stealer() {
         let stealer1 = worker.stealer();
         let stealer2 = worker.stealer();
 
-        let th1 = thread::spawn(move || steal_tasks(stealer1));
-        let th2 = thread::spawn(move || steal_tasks(stealer2));
+        let th1 = thread::spawn(move || steal_half(stealer1));
+        let th2 = thread::spawn(move || steal_half(stealer2));
 
         let mut n = 0;
         for _ in 0..NUM_TASKS {
@@ -225,7 +224,7 @@ fn loom_chained_steal() {
 // A variant of multi-stealer with concurrent push.
 #[test]
 fn loom_push_and_steal() {
-    fn steal_tasks(stealer: Stealer<usize, st3::B4>) -> usize {
+    fn steal_half(stealer: Stealer<usize, st3::B4>) -> usize {
         let dest_worker = Worker::<usize, st3::B4>::new();
 
         match stealer.steal(&dest_worker, |n| n - n / 2) {
@@ -239,8 +238,8 @@ fn loom_push_and_steal() {
         let stealer1 = worker.stealer();
         let stealer2 = worker.stealer();
 
-        let th1 = thread::spawn(move || steal_tasks(stealer1));
-        let th2 = thread::spawn(move || steal_tasks(stealer2));
+        let th1 = thread::spawn(move || steal_half(stealer1));
+        let th2 = thread::spawn(move || steal_half(stealer2));
 
         worker.push(42).unwrap();
         worker.push(42).unwrap();
@@ -254,5 +253,39 @@ fn loom_push_and_steal() {
         n += th2.join().unwrap();
 
         assert_eq!(n, 2);
+    });
+}
+
+// Attempts a number of push operations based on `Worker::free_capacity`.
+#[test]
+fn loom_refill() {
+    fn steal_half(stealer: Stealer<usize, st3::B4>) -> usize {
+        let dest_worker = Worker::<usize, st3::B4>::new();
+
+        match stealer.steal(&dest_worker, |n| n - n / 2) {
+            Ok(n) => n,
+            Err(_) => 0,
+        }
+    }
+
+    loom::model(|| {
+        let worker = Worker::<usize, st3::B4>::new();
+        let stealer1 = worker.stealer();
+        let stealer2 = worker.stealer();
+
+        let th1 = thread::spawn(move || steal_half(stealer1));
+        let th2 = thread::spawn(move || steal_half(stealer2));
+
+        worker.push(1).unwrap();
+        worker.push(7).unwrap();
+        worker.push(13).unwrap();
+        worker.push(42).unwrap();
+
+        for _ in 0..worker.spare_capacity() {
+            assert_eq!(worker.push(2), Ok(()));
+        }
+
+        th1.join().unwrap();
+        th2.join().unwrap();
     });
 }

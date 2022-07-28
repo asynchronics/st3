@@ -63,8 +63,7 @@ fn drain_steal() {
     for rotation in [0, 255, 256, 257, 65535, 65536, 65537] {
         let worker = Worker::<_, st3::B128>::new();
         let dummy_worker = Worker::<_, st3::B128>::new();
-        let stealer1 = worker.stealer();
-        let stealer2 = worker.stealer();
+        let stealer = worker.stealer();
         rotate(&worker, rotation);
 
         worker.push(1).unwrap();
@@ -73,18 +72,18 @@ fn drain_steal() {
         worker.push(4).unwrap();
 
         assert_eq!(worker.pop(), Some(4));
-        let mut iter = stealer1.drain(|n| n - 1).unwrap();
+        let mut iter = worker.drain(|n| n - 1).unwrap();
         assert_eq!(
-            stealer2.steal_and_pop(&dummy_worker, |_| 1),
+            stealer.steal_and_pop(&dummy_worker, |_| 1),
             Err(StealError::Busy)
         );
         assert_eq!(iter.next(), Some(1));
         assert_eq!(
-            stealer2.steal_and_pop(&dummy_worker, |_| 1),
+            stealer.steal_and_pop(&dummy_worker, |_| 1),
             Err(StealError::Busy)
         );
         assert_eq!(iter.next(), Some(2));
-        assert_eq!(stealer2.steal_and_pop(&dummy_worker, |_| 1), Ok((3, 0)));
+        assert_eq!(stealer.steal_and_pop(&dummy_worker, |_| 1), Ok((3, 0)));
         assert_eq!(iter.next(), None);
     }
 }
@@ -100,7 +99,7 @@ fn multi_threaded_steal() {
     let counter0 = counter.clone();
     let stealer1 = stealer.clone();
     let counter1 = counter.clone();
-    let stealer2 = stealer;
+    let stealer = stealer;
     let counter2 = counter;
 
     // Worker thread.
@@ -160,7 +159,7 @@ fn multi_threaded_steal() {
         stats
     }
     let t1 = spawn(move || steal_periodically(stealer1, counter1, 1));
-    let t2 = spawn(move || steal_periodically(stealer2, counter2, 2));
+    let t2 = spawn(move || steal_periodically(stealer, counter2, 2));
     let mut stats = Vec::new();
     stats.push(t0.join().unwrap());
     stats.push(t1.join().unwrap());

@@ -378,6 +378,44 @@ impl<T, B: Buffer<T>> Worker<T, B> {
         Ok(())
     }
 
+    /// Attempts to push the content of an iterator at the tail of the queue.
+    ///
+    /// It is the responsibility of the caller to ensure that there is enough
+    /// spare capacity to accommodate all iterator items, for instance by
+    /// calling `[Worker::spare_capacity]` beforehand. Otherwise, the iterator
+    /// is dropped while still holding the excess items.
+    pub fn extend<I: IntoIterator<Item = T>>(&self, iter: I) {
+        let push_count = self.queue.push_count.load(Relaxed);
+        let pop_count = unpack(self.queue.pop_count_and_head.load(Relaxed)).0;
+        let mut tail = push_count.wrapping_sub(pop_count);
+
+        // Ordering: Acquire ordering is required to synchronize with the
+        // Release of the `head` atomic at the end of a stealing operation and
+        // ensure that the stealer has finished copying the items from the
+        // buffer.
+        let head = self.queue.head.load(Acquire);
+
+        let max_tail = head.wrapping_add(B::CAPACITY);
+        for item in iter {
+            // Check whether the buffer is full.
+            if tail == max_tail {
+                break;
+            }
+            // Store the item.
+            unsafe { self.queue.write_at(tail, item) };
+            tail = tail.wrapping_add(1);
+        }
+
+        // Make the items visible by incrementing the push count.
+        //
+        // Ordering: the Release ordering ensures that the subsequent
+        // acquisition of this atomic by a stealer will make the previous write
+        // visible.
+        self.queue
+            .push_count
+            .store(tail.wrapping_add(pop_count), Release);
+    }
+
     /// Attempts to pop one item from the tail of the queue.
     ///
     /// This returns None if the queue is empty.

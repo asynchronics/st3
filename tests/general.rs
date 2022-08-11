@@ -89,6 +89,45 @@ fn drain_steal() {
 }
 
 #[test]
+fn extend_basic() {
+    for rotation in [0, 255, 256, 257, 65535, 65536, 65537] {
+        let worker = Worker::<_, st3::B128>::new();
+        rotate(&worker, rotation);
+
+        let initial_capacity = worker.spare_capacity();
+        worker.push(1).unwrap();
+        worker.push(2).unwrap();
+        worker.extend([3, 4]);
+
+        assert_eq!(worker.spare_capacity(), initial_capacity - 4);
+        assert_eq!(worker.pop(), Some(4));
+        assert_eq!(worker.pop(), Some(3));
+        assert_eq!(worker.pop(), Some(2));
+        assert_eq!(worker.pop(), Some(1));
+        assert_eq!(worker.pop(), None);
+    }
+}
+
+#[test]
+fn extend_overflow() {
+    for rotation in [0, 255, 256, 257, 65535, 65536, 65537] {
+        let worker = Worker::<_, st3::B128>::new();
+        rotate(&worker, rotation);
+
+        let initial_capacity = worker.spare_capacity();
+        worker.push(1).unwrap();
+        worker.push(2).unwrap();
+        worker.extend(3..); // try to append infinitely many integers
+
+        assert_eq!(worker.spare_capacity(), 0);
+        for i in (1..=initial_capacity).rev() {
+            assert_eq!(worker.pop(), Some(i));
+        }
+        assert_eq!(worker.pop(), None);
+    }
+}
+
+#[test]
 fn multi_threaded_steal() {
     const N: usize = 80_000_000;
 

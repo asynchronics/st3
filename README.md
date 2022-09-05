@@ -41,7 +41,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-st3 = "0.2.0"
+st3 = "0.3.0"
 ```
 
 
@@ -162,20 +162,20 @@ positions that can index many times the actual buffer capacity so as to increase
 the cycle period beyond worst-case preemption.
 
 Unlike Tokio, *St³* will by default use 32-bit rather than 16-bit buffer
-positions. Why? In my opinion, relying on 16 bits to prevent ABA is risky
-whereas 32 bits should in practice provides full resilience. This requires the
-use of 64-bit atomics, however, which on 32-bit targets may not be supported
-(e.g. MIPS) or are slower (e.g. ARMv7). The less paranoid among us can still
-disable the default `long_counter` feature to use 32-bit atomics and 16-bit
-buffer positions on those targets:
+positions. Relying on 16 bits to prevent ABA is fairly risky whereas 32 bits
+should in practice provides full resilience. This requires the use of 64-bit
+atomics, however, which on 32-bit targets may not be supported (e.g. MIPS) or
+may be slower (e.g. ARMv7). If you like to live dangerously, you can still elect
+to disable the default `long_counter` feature and use 16-bit buffer positions
+instead:
 
 ```toml
 [dependencies]
-st3 = { version = "0.2.0", default-features = false }
+st3 = { version = "0.3.0", default-features = false }
 ```
 
 Note that disabling this feature has no effect on 64-bit targets: those will
-still use 32-bit buffer positions to prevent ABA.
+still use 32-bit buffer positions.
 
 [ABA]: https://en.wikipedia.org/wiki/ABA_problem
 

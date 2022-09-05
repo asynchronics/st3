@@ -1,4 +1,4 @@
-# 0.3.0 (????-??-??)
+# 0.3.0 (2022-09-05)
 
 - Implement FusedIterator for the Drain iterator.
 - Add a `Worker::spare_capacity` method.

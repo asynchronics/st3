@@ -735,7 +735,7 @@ unsafe impl<T: Send, B: Buffer<T>> Send for Stealer<T, B> {}
 unsafe impl<T: Send, B: Buffer<T>> Sync for Stealer<T, B> {}
 
 /// Error returned when stealing is unsuccessful.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StealError {
     /// No item was stolen.
     Empty,

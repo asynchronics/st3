@@ -54,7 +54,7 @@
 pub mod buffers;
 pub use buffers::*;
 mod config;
-mod loom_types;
+mod loom_exports;
 
 use std::fmt;
 use std::iter::FusedIterator;
@@ -67,7 +67,7 @@ use std::sync::Arc;
 use cache_padded::CachePadded;
 
 use config::{AtomicUnsignedLong, AtomicUnsignedShort, UnsignedLong, UnsignedShort};
-use loom_types::cell::UnsafeCell;
+use loom_exports::cell::UnsafeCell;
 
 /// A double-ended queue.
 ///

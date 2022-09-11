@@ -1,4 +1,4 @@
-use crate::loom_types::sync::atomic;
+use crate::loom_exports::sync::atomic;
 
 // If the target is 64-bit wide or the `long_counter` feature is selected (which
 // is the default), use u64 as a long integer and u32 as short integer.

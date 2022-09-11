@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use std::mem::MaybeUninit;
 
 use crate::config::UnsignedShort;
-use crate::loom_types::cell::UnsafeCell;
+use crate::loom_exports::cell::UnsafeCell;
 
 /// Marker trait for fixed-size buffers.
 pub trait Buffer<T>: private::Sealed {

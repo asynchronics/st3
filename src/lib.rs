@@ -613,7 +613,8 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
         let dest_pop_count = unpack(dest.queue.pop_count_and_head.load(Relaxed)).0;
         let dest_tail = dest_push_count.wrapping_sub(dest_pop_count);
         let dest_head = dest.queue.head.load(Acquire);
-        let dest_free_capacity = BDest::CAPACITY - dest_tail.wrapping_sub(dest_head);
+        let dest_free_capacity =
+            BDest::CAPACITY - dest_tail.wrapping_sub(dest_head).min(BDest::CAPACITY);
         let (old_head, new_head, transfer_count) =
             self.queue.book_items(count_fn, dest_free_capacity)?;
 

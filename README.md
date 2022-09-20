@@ -41,7 +41,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-st3 = "0.3.0"
+st3 = "0.3.1"
 ```
 
 
@@ -171,7 +171,7 @@ instead:
 
 ```toml
 [dependencies]
-st3 = { version = "0.3.0", default-features = false }
+st3 = { version = "0.3.1", default-features = false }
 ```
 
 Note that disabling this feature has no effect on 64-bit targets: those will

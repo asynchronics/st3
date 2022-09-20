@@ -1,3 +1,8 @@
+# 0.3.1 (2022-09-20)
+
+- Fix bug that could result in an underflow when estimating the capacity of a
+  stealer.
+
 # 0.3.0 (2022-09-05)
 
 - Implement FusedIterator for the Drain iterator.

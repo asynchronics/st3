@@ -1,3 +1,8 @@
+# ?.?.? (????-??-??)
+
+- Revert the fix added in 0.3.1 as the code was actually correct and the fix was
+  unnecessary (comments added).
+
 # 0.3.1 (2022-09-20)
 
 - Fix bug that could result in an underflow when estimating the capacity of a

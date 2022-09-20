@@ -321,8 +321,10 @@ impl<T, B: Buffer<T>> Worker<T, B> {
         let head = self.queue.head.load(Relaxed);
 
         // Aggregate count of available items (those which can be popped) and of
-        // items currently being stolen. Because the value of `head` may be
-        // stale, it is necessary to cap this value by the maximum capacity.
+        // items currently being stolen. Note that even if the value of `head`
+        // is stale `len` can never exceed the maximum capacity because it is
+        // computed on the same thread that pushes items, but `push` would fail
+        // if `head` suggested that there is no spare capacity.
         let len = tail.wrapping_sub(head).min(capacity);
 
         (capacity - len) as usize
@@ -608,13 +610,18 @@ impl<T, B: Buffer<T>> Stealer<T, B> {
     {
         // Compute the free capacity of the destination queue.
         //
+        // Note that even if the value of `dest_head` is stale, the subtraction
+        // that computes `dest_free_capacity` can never overflow since it is
+        // computed on the same thread that pushes items to the destination
+        // queue, but `push` would fail if `dest_head` suggested that there is
+        // no spare capacity.
+        //
         // Ordering: see `Worker::push()` method.
         let dest_push_count = dest.queue.push_count.load(Relaxed);
         let dest_pop_count = unpack(dest.queue.pop_count_and_head.load(Relaxed)).0;
         let dest_tail = dest_push_count.wrapping_sub(dest_pop_count);
         let dest_head = dest.queue.head.load(Acquire);
-        let dest_free_capacity =
-            BDest::CAPACITY - dest_tail.wrapping_sub(dest_head).min(BDest::CAPACITY);
+        let dest_free_capacity = BDest::CAPACITY - dest_tail.wrapping_sub(dest_head);
         let (old_head, new_head, transfer_count) =
             self.queue.book_items(count_fn, dest_free_capacity)?;
 

@@ -161,9 +161,8 @@ to steal more items than are available. ABA is overcome by using buffer
 positions that can index many times the actual buffer capacity so as to increase
 the cycle period beyond worst-case preemption.
 
-Unlike Tokio, *St³* will by default use 32-bit rather than 16-bit buffer
-positions. Relying on 16 bits to prevent ABA is fairly risky whereas 32 bits
-should in practice provides full resilience. This requires the use of 64-bit
+For this reason, *St³* will by default use 32-bit buffer positions, which should
+in practice provide full resilience against ABA. This requires the use of 64-bit
 atomics, however, which on 32-bit targets may not be supported (e.g. MIPS) or
 may be slower (e.g. ARMv7). If you like to live dangerously, you can still elect
 to disable the default `long_counter` feature and use 16-bit buffer positions

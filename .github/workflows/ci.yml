@@ -17,81 +17,56 @@ jobs:
           - 1.56.1
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
-          profile: minimal
-          override: true
 
       - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --benches
+        run: cargo check --benches
 
   check-no-atomic-u64:
     name: Check (no AtomicU64)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: mips-unknown-linux-gnu
-          profile: minimal
-          override: true
+          targets: mips-unknown-linux-gnu
 
       - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --target mips-unknown-linux-gnu --no-default-features
+        run: cargo check --target mips-unknown-linux-gnu --no-default-features
 
   test:
     name: Test suite
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release
+        run: cargo test --release
 
   loom:
     name: Test suite (Loom)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo test (Loom)
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --tests --release
+        run: cargo test --tests --release
         env:
           LOOM_MAX_PREEMPTIONS: 3 
           RUSTFLAGS: --cfg st3_loom
@@ -101,44 +76,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          profile: minimal
-          override: true
           components: rustfmt, clippy
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -D warnings
+        run: cargo clippy -- -D warnings
 
   docs:
     name: Docs
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo doc
-        uses: actions-rs/cargo@v1
-        with:
-          command: doc
-          args: --no-deps --document-private-items
+        run: cargo doc --no-deps --document-private-items

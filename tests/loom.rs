@@ -1,19 +1,19 @@
 use loom::thread;
 
-use st3::{Stealer, Worker};
+use st3::lifo;
 
 // Test adapted from the Tokio test suite.
 #[test]
-fn loom_basic_steal() {
+fn loom_lifo_basic_steal() {
     const LOOP_COUNT: usize = 2;
     const ITEM_COUNT_PER_LOOP: usize = 3;
 
     loom::model(|| {
-        let worker = Worker::<usize, st3::B4>::new();
+        let worker = lifo::Worker::<usize, st3::B4>::new();
         let stealer = worker.stealer();
 
         let th = thread::spawn(move || {
-            let dest_worker = Worker::<usize, st3::B4>::new();
+            let dest_worker = lifo::Worker::<usize, st3::B4>::new();
             let mut n = 0;
 
             for _ in 0..3 {
@@ -57,15 +57,15 @@ fn loom_basic_steal() {
 
 // Test adapted from the Tokio test suite.
 #[test]
-fn loom_drain_overflow() {
+fn loom_lifo_drain_overflow() {
     const ITEM_COUNT: usize = 7;
 
     loom::model(|| {
-        let worker = Worker::<usize, st3::B4>::new();
+        let worker = lifo::Worker::<usize, st3::B4>::new();
         let stealer = worker.stealer();
 
         let th = thread::spawn(move || {
-            let dest_worker = Worker::<usize, st3::B4>::new();
+            let dest_worker = lifo::Worker::<usize, st3::B4>::new();
             let mut n = 0;
 
             let _ = stealer.steal(&dest_worker, |n| n - n / 2);
@@ -114,11 +114,11 @@ fn loom_drain_overflow() {
 
 // Test adapted from the Tokio test suite.
 #[test]
-fn loom_multi_stealer() {
+fn loom_lifo_multi_stealer() {
     const ITEM_COUNT: usize = 5;
 
-    fn steal_half(stealer: Stealer<usize, st3::B4>) -> usize {
-        let dest_worker = Worker::<usize, st3::B4>::new();
+    fn steal_half(stealer: lifo::Stealer<usize, st3::B4>) -> usize {
+        let dest_worker = lifo::Worker::<usize, st3::B4>::new();
 
         let _ = stealer.steal(&dest_worker, |n| n - n / 2);
 
@@ -131,7 +131,7 @@ fn loom_multi_stealer() {
     }
 
     loom::model(|| {
-        let worker = Worker::<usize, st3::B4>::new();
+        let worker = lifo::Worker::<usize, st3::B4>::new();
         let stealer1 = worker.stealer();
         let stealer2 = worker.stealer();
 
@@ -158,10 +158,10 @@ fn loom_multi_stealer() {
 
 // Test adapted from the Tokio test suite.
 #[test]
-fn loom_chained_steal() {
+fn loom_lifo_chained_steal() {
     loom::model(|| {
-        let w1 = Worker::<usize, st3::B4>::new();
-        let w2 = Worker::<usize, st3::B4>::new();
+        let w1 = lifo::Worker::<usize, st3::B4>::new();
+        let w2 = lifo::Worker::<usize, st3::B4>::new();
         let s1 = w1.stealer();
         let s2 = w2.stealer();
 
@@ -171,7 +171,7 @@ fn loom_chained_steal() {
         }
 
         let th = thread::spawn(move || {
-            let dest_worker = Worker::<usize, st3::B4>::new();
+            let dest_worker = lifo::Worker::<usize, st3::B4>::new();
             let _ = s1.steal(&dest_worker, |n| n - n / 2);
 
             while dest_worker.pop().is_some() {}
@@ -190,9 +190,9 @@ fn loom_chained_steal() {
 
 // A variant of multi-stealer with concurrent push.
 #[test]
-fn loom_push_and_steal() {
-    fn steal_half(stealer: Stealer<usize, st3::B4>) -> usize {
-        let dest_worker = Worker::<usize, st3::B4>::new();
+fn loom_lifo_push_and_steal() {
+    fn steal_half(stealer: lifo::Stealer<usize, st3::B4>) -> usize {
+        let dest_worker = lifo::Worker::<usize, st3::B4>::new();
 
         match stealer.steal(&dest_worker, |n| n - n / 2) {
             Ok(n) => n,
@@ -201,7 +201,7 @@ fn loom_push_and_steal() {
     }
 
     loom::model(|| {
-        let worker = Worker::<usize, st3::B4>::new();
+        let worker = lifo::Worker::<usize, st3::B4>::new();
         let stealer1 = worker.stealer();
         let stealer2 = worker.stealer();
 
@@ -223,11 +223,11 @@ fn loom_push_and_steal() {
     });
 }
 
-// Attempts extending the queue based on `Worker::free_capacity`.
+// Attempts extending the queue based on `lifo::Worker::free_capacity`.
 #[test]
-fn loom_extend() {
-    fn steal_half(stealer: Stealer<usize, st3::B4>) -> usize {
-        let dest_worker = Worker::<usize, st3::B4>::new();
+fn loom_lifo_extend() {
+    fn steal_half(stealer: lifo::Stealer<usize, st3::B4>) -> usize {
+        let dest_worker = lifo::Worker::<usize, st3::B4>::new();
 
         match stealer.steal(&dest_worker, |n| n - n / 2) {
             Ok(n) => n,
@@ -236,7 +236,7 @@ fn loom_extend() {
     }
 
     loom::model(|| {
-        let worker = Worker::<usize, st3::B4>::new();
+        let worker = lifo::Worker::<usize, st3::B4>::new();
         let stealer1 = worker.stealer();
         let stealer2 = worker.stealer();
 

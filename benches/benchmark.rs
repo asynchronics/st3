@@ -31,8 +31,8 @@ pub fn push_pop<T, W: GenericWorker<usize>, const N: usize>(name: &str, c: &mut 
     });
 }
 
-pub fn push_pop_small_batch_st3(c: &mut Criterion) {
-    push_pop::<usize, st3::Worker<_, st3::B256>, 64>("small_batch-st3", c);
+pub fn push_pop_small_batch_st3_lifo(c: &mut Criterion) {
+    push_pop::<usize, st3::lifo::Worker<_, st3::B256>, 64>("small_batch-st3_lifo", c);
 }
 pub fn push_pop_small_batch_tokio(c: &mut Criterion) {
     push_pop::<usize, tokio_queue::Local<_>, 64>("small_batch-tokio", c);
@@ -43,8 +43,8 @@ pub fn push_pop_small_batch_crossbeam_fifo(c: &mut Criterion) {
 pub fn push_pop_small_batch_crossbeam_lifo(c: &mut Criterion) {
     push_pop::<usize, CrossbeamLifoWorker<_>, 64>("small_batch-crossbeam_lifo", c);
 }
-pub fn push_pop_large_batch_st3(c: &mut Criterion) {
-    push_pop::<usize, st3::Worker<_, st3::B256>, 256>("large_batch-st3", c);
+pub fn push_pop_large_batch_st3_lifo(c: &mut Criterion) {
+    push_pop::<usize, st3::lifo::Worker<_, st3::B256>, 256>("large_batch-st3_lifo", c);
 }
 pub fn push_pop_large_batch_tokio(c: &mut Criterion) {
     push_pop::<usize, tokio_queue::Local<_>, 256>("large_batch-tokio", c);
@@ -199,8 +199,8 @@ pub fn executor<T, W: GenericWorker<u64> + 'static>(name: &str, c: &mut Criterio
         })
     });
 }
-pub fn executor_st3(c: &mut Criterion) {
-    executor::<usize, st3::Worker<_, st3::B256>>("st3", c);
+pub fn executor_st3_lifo(c: &mut Criterion) {
+    executor::<usize, st3::lifo::Worker<_, st3::B256>>("st3_lifo", c);
 }
 pub fn executor_tokio(c: &mut Criterion) {
     executor::<usize, tokio_queue::Local<_>>("tokio", c);
@@ -214,15 +214,15 @@ pub fn executor_crossbeam_lifo(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    push_pop_small_batch_st3,
+    push_pop_small_batch_st3_lifo,
     push_pop_small_batch_tokio,
     push_pop_small_batch_crossbeam_fifo,
     push_pop_small_batch_crossbeam_lifo,
-    push_pop_large_batch_st3,
+    push_pop_large_batch_st3_lifo,
     push_pop_large_batch_tokio,
     push_pop_large_batch_crossbeam_fifo,
     push_pop_large_batch_crossbeam_lifo,
-    executor_st3,
+    executor_st3_lifo,
     executor_tokio,
     executor_crossbeam_fifo,
     executor_crossbeam_lifo,

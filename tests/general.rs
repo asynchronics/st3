@@ -2,12 +2,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::spawn;
 
-use st3::{Buffer, StealError, Stealer, Worker};
+use st3::{lifo, Buffer, StealError};
 
 // Rotate the internal ring buffer indices by `n`.
-fn rotate<T: Default + std::fmt::Debug, B: Buffer<T>>(worker: &Worker<T, B>, n: usize) {
+fn lifo_rotate<T: Default + std::fmt::Debug, B: Buffer<T>>(worker: &lifo::Worker<T, B>, n: usize) {
     let stealer = worker.stealer();
-    let dummy_worker = Worker::<T, st3::B2>::new();
+    let dummy_worker = lifo::Worker::<T, st3::B2>::new();
 
     for _ in 0..n {
         worker.push(T::default()).unwrap();
@@ -16,13 +16,19 @@ fn rotate<T: Default + std::fmt::Debug, B: Buffer<T>>(worker: &Worker<T, B>, n: 
 }
 
 #[test]
-fn single_threaded_steal() {
-    for rotation in [0, 255, 256, 257, 65535, 65536, 65537] {
-        let worker1 = Worker::<_, st3::B128>::new();
-        let worker2 = Worker::<_, st3::B128>::new();
+fn lifo_single_threaded_steal() {
+    const ROTATIONS: &[usize] = if cfg!(miri) {
+        &[0]
+    } else {
+        &[0, 255, 256, 257, 65535, 65536, 65537]
+    };
+
+    for &rotation in ROTATIONS {
+        let worker1 = lifo::Worker::<_, st3::B128>::new();
+        let worker2 = lifo::Worker::<_, st3::B128>::new();
         let stealer1 = worker1.stealer();
-        rotate(&worker1, rotation);
-        rotate(&worker2, rotation);
+        lifo_rotate(&worker1, rotation);
+        lifo_rotate(&worker2, rotation);
 
         worker1.push(1).unwrap();
         worker1.push(2).unwrap();
@@ -39,10 +45,16 @@ fn single_threaded_steal() {
 }
 
 #[test]
-fn self_steal() {
-    for rotation in [0, 255, 256, 257, 65535, 65536, 65537] {
-        let worker = Worker::<_, st3::B128>::new();
-        rotate(&worker, rotation);
+fn lifo_self_steal() {
+    const ROTATIONS: &[usize] = if cfg!(miri) {
+        &[0]
+    } else {
+        &[0, 255, 256, 257, 65535, 65536, 65537]
+    };
+
+    for &rotation in ROTATIONS {
+        let worker = lifo::Worker::<_, st3::B128>::new();
+        lifo_rotate(&worker, rotation);
         let stealer = worker.stealer();
 
         worker.push(1).unwrap();
@@ -59,12 +71,18 @@ fn self_steal() {
 }
 
 #[test]
-fn drain_steal() {
-    for rotation in [0, 255, 256, 257, 65535, 65536, 65537] {
-        let worker = Worker::<_, st3::B128>::new();
-        let dummy_worker = Worker::<_, st3::B128>::new();
+fn lifo_drain_steal() {
+    const ROTATIONS: &[usize] = if cfg!(miri) {
+        &[0]
+    } else {
+        &[0, 255, 256, 257, 65535, 65536, 65537]
+    };
+
+    for &rotation in ROTATIONS {
+        let worker = lifo::Worker::<_, st3::B128>::new();
+        let dummy_worker = lifo::Worker::<_, st3::B128>::new();
         let stealer = worker.stealer();
-        rotate(&worker, rotation);
+        lifo_rotate(&worker, rotation);
 
         worker.push(1).unwrap();
         worker.push(2).unwrap();
@@ -89,10 +107,16 @@ fn drain_steal() {
 }
 
 #[test]
-fn extend_basic() {
-    for rotation in [0, 255, 256, 257, 65535, 65536, 65537] {
-        let worker = Worker::<_, st3::B128>::new();
-        rotate(&worker, rotation);
+fn lifo_extend_basic() {
+    const ROTATIONS: &[usize] = if cfg!(miri) {
+        &[0]
+    } else {
+        &[0, 255, 256, 257, 65535, 65536, 65537]
+    };
+
+    for &rotation in ROTATIONS {
+        let worker = lifo::Worker::<_, st3::B128>::new();
+        lifo_rotate(&worker, rotation);
 
         let initial_capacity = worker.spare_capacity();
         worker.push(1).unwrap();
@@ -109,10 +133,16 @@ fn extend_basic() {
 }
 
 #[test]
-fn extend_overflow() {
-    for rotation in [0, 255, 256, 257, 65535, 65536, 65537] {
-        let worker = Worker::<_, st3::B128>::new();
-        rotate(&worker, rotation);
+fn lifo_extend_overflow() {
+    const ROTATIONS: &[usize] = if cfg!(miri) {
+        &[0]
+    } else {
+        &[0, 255, 256, 257, 65535, 65536, 65537]
+    };
+
+    for &rotation in ROTATIONS {
+        let worker = lifo::Worker::<_, st3::B128>::new();
+        lifo_rotate(&worker, rotation);
 
         let initial_capacity = worker.spare_capacity();
         worker.push(1).unwrap();
@@ -128,11 +158,11 @@ fn extend_overflow() {
 }
 
 #[test]
-fn multi_threaded_steal() {
-    const N: usize = 80_000_000;
+fn lifo_multi_threaded_steal() {
+    const N: usize = if cfg!(miri) { 200 } else { 80_000_000 };
 
     let counter = Arc::new(AtomicUsize::new(0));
-    let worker = Worker::<_, st3::B128>::new();
+    let worker = lifo::Worker::<_, st3::B128>::new();
     let stealer = worker.stealer();
 
     let counter0 = counter.clone();
@@ -141,7 +171,7 @@ fn multi_threaded_steal() {
     let stealer = stealer;
     let counter2 = counter;
 
-    // Worker thread.
+    // lifo::Worker thread.
     //
     // Push all numbers from 0 to N, popping one from time to time.
     let t0 = spawn(move || {
@@ -169,13 +199,13 @@ fn multi_threaded_steal() {
     //
     // Repeatedly steal a random number of items.
     fn steal_periodically(
-        stealer: Stealer<usize, st3::B128>,
+        stealer: lifo::Stealer<usize, st3::B128>,
         counter: Arc<AtomicUsize>,
         rng_seed: u64,
     ) -> Vec<usize> {
         let mut stats = vec![0; N];
         let mut rng = oorandom::Rand32::new(rng_seed);
-        let dest_worker = Worker::<_, st3::B128>::new();
+        let dest_worker = lifo::Worker::<_, st3::B128>::new();
 
         loop {
             if let Ok((i, _)) =

@@ -27,8 +27,8 @@ pub trait GenericStealer<T>: Clone + Send + Sync {
 }
 
 /// Generic work-stealing queue traits implementation for St3.
-impl<T: Send, B: st3::Buffer<T>> GenericWorker<T> for st3::Worker<T, B> {
-    type S = st3::Stealer<T, B>;
+impl<T: Send, B: st3::Buffer<T>> GenericWorker<T> for st3::lifo::Worker<T, B> {
+    type S = st3::lifo::Stealer<T, B>;
 
     fn new() -> Self {
         Self::new()
@@ -43,8 +43,8 @@ impl<T: Send, B: st3::Buffer<T>> GenericWorker<T> for st3::Worker<T, B> {
         self.stealer()
     }
 }
-impl<T: Send, B: st3::Buffer<T>> GenericStealer<T> for st3::Stealer<T, B> {
-    type W = st3::Worker<T, B>;
+impl<T: Send, B: st3::Buffer<T>> GenericStealer<T> for st3::lifo::Stealer<T, B> {
+    type W = st3::lifo::Worker<T, B>;
 
     fn steal_batch_and_pop(&self, worker: &Self::W) -> Result<T, GenericStealError> {
         // The maximum number of tasks to be stolen is limited in order to match

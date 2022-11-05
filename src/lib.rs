@@ -54,9 +54,12 @@
 
 use std::fmt;
 
+use config::{UnsignedLong, UnsignedShort};
+
 pub mod buffers;
 pub use buffers::*;
 mod config;
+pub mod fifo;
 pub mod lifo;
 mod loom_exports;
 
@@ -76,4 +79,18 @@ impl fmt::Display for StealError {
             StealError::Busy => write!(f, "a concurrent steal operation is ongoing"),
         }
     }
+}
+
+#[inline]
+/// Pack two short integers into a long one.
+fn pack(value1: UnsignedShort, value2: UnsignedShort) -> UnsignedLong {
+    ((value1 as UnsignedLong) << UnsignedShort::BITS) | value2 as UnsignedLong
+}
+#[inline]
+/// Unpack a long integer into 2 short ones.
+fn unpack(value: UnsignedLong) -> (UnsignedShort, UnsignedShort) {
+    (
+        (value >> UnsignedShort::BITS) as UnsignedShort,
+        value as UnsignedShort,
+    )
 }

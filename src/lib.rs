@@ -52,6 +52,7 @@
 #![warn(missing_docs, missing_debug_implementations, unreachable_pub)]
 
 use std::fmt;
+use std::iter::FusedIterator;
 
 use config::{UnsignedLong, UnsignedShort};
 
@@ -92,4 +93,150 @@ fn unpack(value: UnsignedLong) -> (UnsignedShort, UnsignedShort) {
         (value >> UnsignedShort::BITS) as UnsignedShort,
         value as UnsignedShort,
     )
+}
+
+/// Handle for single-threaded FIFO push and pop operations.
+#[derive(Debug)]
+pub enum Worker<T, B: Buffer<T>> {
+    Fifo(fifo::Worker<T, B>),
+    Lifo(lifo::Worker<T, B>),
+}
+
+impl<T, B: Buffer<T>> Worker<T, B> {
+    pub fn new_fifo() -> Self {
+        Self::Fifo(fifo::Worker::new())
+    }
+
+    pub fn new_lifo() -> Self {
+        Self::Lifo(lifo::Worker::new())
+    }
+
+    pub fn stealer(&self) -> Stealer<T, B> {
+        match self {
+            Self::Fifo(worker) => Stealer::Fifo(worker.stealer()),
+            Self::Lifo(worker) => Stealer::Lifo(worker.stealer()),
+        }
+    }
+
+    pub fn spare_capacity(&self) -> usize {
+        match self {
+            Self::Fifo(worker) => worker.spare_capacity(),
+            Self::Lifo(worker) => worker.spare_capacity(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Fifo(worker) => worker.is_empty(),
+            Self::Lifo(worker) => worker.is_empty(),
+        }
+    }
+
+    pub fn push(&self, item: T) -> Result<(), T> {
+        match self {
+            Self::Fifo(worker) => worker.push(item),
+            Self::Lifo(worker) => worker.push(item),
+        }
+    }
+
+    pub fn extend<I: IntoIterator<Item = T>>(&self, iter: I) {
+        match self {
+            Self::Fifo(worker) => worker.extend(iter),
+            Self::Lifo(worker) => worker.extend(iter),
+        }
+    }
+
+    pub fn pop(&self) -> Option<T> {
+        match self {
+            Self::Fifo(worker) => worker.pop(),
+            Self::Lifo(worker) => worker.pop(),
+        }
+    }
+
+    pub fn drain<C>(&self, count_fn: C) -> Result<Drain<'_, T, B>, StealError>
+    where
+        C: FnMut(usize) -> usize,
+    {
+        match self {
+            Self::Fifo(worker) => worker.drain(count_fn).map(|drain| Drain::Fifo(drain)),
+            Self::Lifo(worker) => worker.drain(count_fn).map(|drain| Drain::Lifo(drain)),
+        }
+    }
+}
+
+/// A draining iterator for [`Worker<T, B>`].
+///
+/// This iterator is created by [`Worker::drain`]. See its documentation for
+/// more.
+#[derive(Debug)]
+pub enum Drain<'a, T, B: Buffer<T>> {
+    Fifo(fifo::Drain<'a, T, B>),
+    Lifo(lifo::Drain<'a, T, B>),
+}
+
+impl<'a, T, B: Buffer<T>> Iterator for Drain<'a, T, B> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        match self {
+            Self::Fifo(drain) => drain.next(),
+            Self::Lifo(drain) => drain.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::Fifo(drain) => drain.size_hint(),
+            Self::Lifo(drain) => drain.size_hint(),
+        }
+    }
+}
+
+impl<'a, T, B: Buffer<T>> ExactSizeIterator for Drain<'a, T, B> {}
+impl<'a, T, B: Buffer<T>> FusedIterator for Drain<'a, T, B> {}
+
+/// Handle for multi-threaded stealing operations.
+#[derive(Debug)]
+pub enum Stealer<T, B: Buffer<T>> {
+    Fifo(fifo::Stealer<T, B>),
+    Lifo(lifo::Stealer<T, B>),
+}
+
+impl<T, B: Buffer<T>> Stealer<T, B> {
+    pub fn steal<C, BDest>(&self, dest: &Worker<T, BDest>, count_fn: C) -> Result<usize, StealError>
+    where
+        C: FnMut(usize) -> usize,
+        BDest: Buffer<T>,
+    {
+        match (self, dest) {
+            (Self::Fifo(stealer), Worker::Fifo(worker)) => stealer.steal(worker, count_fn),
+            (Self::Lifo(stealer), Worker::Lifo(worker)) => stealer.steal(worker, count_fn),
+            _ => panic!("The type of the stealer must match that of the worker"),
+        }
+    }
+
+    pub fn steal_and_pop<C, BDest>(
+        &self,
+        dest: &Worker<T, BDest>,
+        count_fn: C,
+    ) -> Result<(T, usize), StealError>
+    where
+        C: FnMut(usize) -> usize,
+        BDest: Buffer<T>,
+    {
+        match (self, dest) {
+            (Self::Fifo(stealer), Worker::Fifo(worker)) => stealer.steal_and_pop(worker, count_fn),
+            (Self::Lifo(stealer), Worker::Lifo(worker)) => stealer.steal_and_pop(worker, count_fn),
+            _ => panic!("The type of the stealer must match that of the worker"),
+        }
+    }
+}
+
+impl<T, B: Buffer<T>> Clone for Stealer<T, B> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Fifo(stealer) => Self::Fifo(stealer.clone()),
+            Self::Lifo(stealer) => Self::Lifo(stealer.clone()),
+        }
+    }
 }

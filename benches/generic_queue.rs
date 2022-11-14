@@ -94,6 +94,40 @@ impl<T: Send, B: st3::Buffer<T>> GenericStealer<T> for st3::fifo::Stealer<T, B> 
     }
 }
 
+/// Generic work-stealing queue traits implementation for St3 (generic, LIFO variant).
+impl<T: Send, B: st3::Buffer<T>> GenericWorker<T> for st3::Worker<T, B> {
+    type S = st3::Stealer<T, B>;
+
+    fn new() -> Self {
+        Self::new_lifo()
+    }
+    fn push(&self, item: T) -> Result<(), T> {
+        self.push(item)
+    }
+    fn pop(&self) -> Option<T> {
+        self.pop()
+    }
+    fn stealer(&self) -> Self::S {
+        self.stealer()
+    }
+}
+impl<T: Send, B: st3::Buffer<T>> GenericStealer<T> for st3::Stealer<T, B> {
+    type W = st3::Worker<T, B>;
+
+    fn steal_batch_and_pop(&self, worker: &Self::W) -> Result<T, GenericStealError> {
+        // The maximum number of tasks to be stolen is limited in order to match
+        // the behavior of `crossbeam-dequeue`.
+        const MAX_BATCH_SIZE: usize = 32;
+
+        self.steal_and_pop(worker, |n| (n - n / 2).min(MAX_BATCH_SIZE))
+            .map(|out| out.0)
+            .map_err(|e| match e {
+                st3::StealError::Empty => GenericStealError::Empty,
+                st3::StealError::Busy => GenericStealError::Busy,
+            })
+    }
+}
+
 /// Generic work-stealing queue traits implementation for tokio.
 impl<T: Send> GenericWorker<T> for tokio_queue::Local<T> {
     type S = tokio_queue::Steal<T>;

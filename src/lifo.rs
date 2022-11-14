@@ -1,4 +1,4 @@
-//! # A LIFO, bounded, work-stealing queue.
+//! # LIFO, bounded, work-stealing queue.
 //!
 //! ## Example
 //!

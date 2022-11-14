@@ -1,17 +1,16 @@
 //! # St³ — Stealing Static Stack
 //!
-//! A very fast lock-free, bounded, work-stealing queue with stack-like (LIFO)
-//! semantic for the worker thread and FIFO stealing.
+//! Very fast lock-free, bounded, work-stealing queue with FIFO stealing and
+//! LIFO of FIFO semantic for the worker thread.
 //!
-//! The [`Worker`] handle enables LIFO push and pop operations from a single
-//! thread, while [`Stealer`] handles can be shared between threads to perform
-//! FIFO batch-stealing operations.
+//! The `Worker` handle enables push and pop operations from a single thread,
+//! while `Stealer` handles can be shared between threads to perform FIFO
+//! batch-stealing operations.
 //!
 //! `St³` is effectively a faster, fixed-size alternative to the Chase-Lev
 //! double-ended queue. It uses no atomic fences, much fewer atomic loads and
-//! stores, and fewer Read-Modify-Write operations: none for
-//! [`push`](Worker::push) and only one for [`pop`](Worker::pop) and
-//! [`steal`](Stealer::steal).
+//! stores, and fewer Read-Modify-Write operations: none for `push`, one for
+//! `pop` and one (LIFO) or two (FIFO) for `steal`.
 //!
 //! ## Example
 //!

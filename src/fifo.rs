@@ -1,4 +1,4 @@
-//! # A FIFO, bounded, work-stealing queue.
+//! # FIFO, bounded, work-stealing queue.
 //!
 //! ## Example
 //!

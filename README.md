@@ -1,6 +1,6 @@
 # St³ — the Stealing Static Stack
 
-Lock-free, bounded, work-stealing queues with FIFO stealing amd LIFO or FIFO
+Lock-free, bounded, work-stealing queues with FIFO stealing and LIFO or FIFO
 semantic for the worker thread.
 
 [![Cargo](https://img.shields.io/crates/v/multishot.svg)](https://crates.io/crates/st3)
@@ -16,22 +16,13 @@ the allocation and synchronization overhead associated with unbounded queues
 such as the Chase-Lev work-stealing deque (used in particular by [Crossbeam
 Deque]). This is a natural design choice for schedulers that use a global
 injector queue as the latter often can, at nearly no extra cost, buffer the
-overflow should a local queue become full.
+overflow should a local queue become full. For such applications, `St3` provides
+high-performance, fixed-size, lock-free FIFO and LIFO work-stealing queues.
 
-For such applications, `St3` provides high-performance, fixed-size, lock-free
-FIFO and LIFO work-stealing queues.
-
-The FIFO queue is mostly based on the Tokio queue, but provides a somewhat more
+The FIFO queue is based on the Tokio queue, but provides a somewhat more
 convenient and more flexible API. The LIFO queue is a novel design with the same
-API and performance profile as its FIFO counterpart and can be considered a
+API and performance profile as its FIFO counterpart; it can be considered a
 faster, fixed-size alternative to the Chase-Lev deque.
-
-In theory, the LIFO variant can be expected to perform better in pure
-data-parallelism applications due to lower cache misses and lower contention
-between workers and stealers (items being popped and stolen from opposite ends).
-The FIFO variant may prove in turn preferable for applications such as
-message-passing executors where processing the most recently queued items is not
-necessarily the optimal strategy.
 
 [Tokio]: https://github.com/tokio-rs/tokio
 [Crossbeam Deque]: https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-deque
@@ -51,10 +42,10 @@ st3 = "0.3.1"
 
 ```rust
 use std::thread;
-use st3::{Worker, B256};
+use st3::lifo::Worker;
 
 // Push 4 items into a queue of capacity 256.
-let worker = Worker::<_, B256>::new();
+let worker = Worker::new(256);
 worker.push("a").unwrap();
 worker.push("b").unwrap();
 worker.push("c").unwrap();
@@ -63,8 +54,7 @@ worker.push("d").unwrap();
 // Steal items concurrently.
 let stealer = worker.stealer();
 let th = thread::spawn(move || {
-    let other_worker = Worker::<_, B256>::new();
-
+    let other_worker = Worker::new(256);
     // Try to steal half the items and return the actual count of stolen items.
     match stealer.steal(&other_worker, |n| n/2) {
         Ok(actual) => actual,
@@ -86,10 +76,10 @@ assert_eq!(pop_count + steal_count, 4);
 
 ## Safety — a word of caution
 
-The queues are low-level primitives and as such their implementation relies on
-`unsafe`. The test suite makes extensive use of [Loom] to assess correctness. As
-amazing as it is, however, Loom is only a tool: it cannot formally prove the
-absence of data races.
+The *St³* queues are low-level primitives and as such their implementation
+relies on `unsafe`. The test suite makes extensive use of [Loom] to assess
+correctness. As amazing as it is, however, Loom is only a tool: it cannot
+formally prove the absence of data races.
 
 Before *St³* sees wider use in the field and receives greater scrutiny, you
 should exercise caution before using it in mission-critical software. The LIFO
@@ -110,23 +100,23 @@ The first benchmark measures performance in the single-threaded, no-stealing
 case: a series of 64 `push` operations (or 256 in the large-batch case) is
 followed by as many pop operations.
 
-Test CPU: i5-7200U.
+*Test CPU: i5-7200U*
 
 | benchmark            | queue                            | average time |
 |----------------------|----------------------------------|:------------:|
-| push_pop-small_batch | St³ FIFO                         |    836 ns    |
-| push_pop-small_batch | St³ LIFO                         |    797 ns    |
-| push_pop-small_batch | Tokio (FIFO)                     |    835 ns    |
-| push_pop-small_batch | Crossbeam Deque (Chase-Lev) FIFO |    837 ns    |
-| push_pop-small_batch | Crossbeam Deque (Chase-Lev) LIFO |   1357 ns    |
+| push_pop-small_batch | St³ FIFO                         |    841 ns    |
+| push_pop-small_batch | St³ LIFO                         |    830 ns    |
+| push_pop-small_batch | Tokio (FIFO)                     |    834 ns    |
+| push_pop-small_batch | Crossbeam Deque (Chase-Lev) FIFO |    835 ns    |
+| push_pop-small_batch | Crossbeam Deque (Chase-Lev) LIFO |   1346 ns    |
 
 | benchmark            | queue                            | average time |
 |----------------------|----------------------------------|:------------:|
-| push_pop-large_batch | St³ FIFO                         |   3368 ns    |
-| push_pop-large_batch | St³ LIFO                         |   3310 ns    |
-| push_pop-large_batch | Tokio (FIFO)                     |   3370 ns    |
-| push_pop-large_batch | Crossbeam Deque (Chase-Lev) FIFO |   5249 ns    |
-| push_pop-large_batch | Crossbeam Deque (Chase-Lev) LIFO |   7326 ns    |
+| push_pop-large_batch | St³ FIFO                         |   3383 ns    |
+| push_pop-large_batch | St³ LIFO                         |   3370 ns    |
+| push_pop-large_batch | Tokio (FIFO)                     |   3280 ns    |
+| push_pop-large_batch | Crossbeam Deque (Chase-Lev) FIFO |   5282 ns    |
+| push_pop-large_batch | Crossbeam Deque (Chase-Lev) LIFO |   7306 ns    |
 
 The second benchmark is a synthetic test that aims at characterizing
 multi-threaded performance with concurrent stealing. It uses a toy work-stealing
@@ -142,18 +132,17 @@ ultimately non-deterministic as it is affected by thread timing.
 
 Given the somewhat simplistic and subjective design of the benchmark, **the
 figures below must be taken with a grain of salt**. In particular, this
-benchmark does not model message-passing, which in practice was observed to
-often favor FIFO queues.
+benchmark does not model message-passing.
 
-Test CPU: i5-7200U.
+*Test CPU: i5-7200U*
 
 | benchmark | queue                            | average time |
 |-----------|----------------------------------|:------------:|
-| executor  | St³ FIFO                         |    210 µs    |
-| executor  | St³ LIFO                         |    221 µs    |
-| executor  | Tokio (FIFO)                     |    248 µs    |
-| executor  | Crossbeam Deque (Chase-Lev) FIFO |    318 µs    |
-| executor  | Crossbeam Deque (Chase-Lev) LIFO |    304 µs    |
+| executor  | St³ FIFO                         |    216 µs    |
+| executor  | St³ LIFO                         |    222 µs    |
+| executor  | Tokio (FIFO)                     |    254 µs    |
+| executor  | Crossbeam Deque (Chase-Lev) FIFO |    321 µs    |
+| executor  | Crossbeam Deque (Chase-Lev) LIFO |    301 µs    |
 
 
 ## ABA

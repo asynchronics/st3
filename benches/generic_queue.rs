@@ -27,11 +27,11 @@ pub trait GenericStealer<T>: Clone + Send + Sync {
 }
 
 /// Generic work-stealing queue traits implementation for St3 (LIFO).
-impl<T: Send, B: st3::Buffer<T>> GenericWorker<T> for st3::lifo::Worker<T, B> {
-    type S = st3::lifo::Stealer<T, B>;
+impl<T: Send> GenericWorker<T> for st3::lifo::Worker<T> {
+    type S = st3::lifo::Stealer<T>;
 
     fn new() -> Self {
-        Self::new()
+        Self::new(256)
     }
     fn push(&self, item: T) -> Result<(), T> {
         self.push(item)
@@ -43,8 +43,8 @@ impl<T: Send, B: st3::Buffer<T>> GenericWorker<T> for st3::lifo::Worker<T, B> {
         self.stealer()
     }
 }
-impl<T: Send, B: st3::Buffer<T>> GenericStealer<T> for st3::lifo::Stealer<T, B> {
-    type W = st3::lifo::Worker<T, B>;
+impl<T: Send> GenericStealer<T> for st3::lifo::Stealer<T> {
+    type W = st3::lifo::Worker<T>;
 
     fn steal_batch_and_pop(&self, worker: &Self::W) -> Result<T, GenericStealError> {
         // The maximum number of tasks to be stolen is limited in order to match
@@ -61,11 +61,11 @@ impl<T: Send, B: st3::Buffer<T>> GenericStealer<T> for st3::lifo::Stealer<T, B> 
 }
 
 /// Generic work-stealing queue traits implementation for St3 (FIFO).
-impl<T: Send, B: st3::Buffer<T>> GenericWorker<T> for st3::fifo::Worker<T, B> {
-    type S = st3::fifo::Stealer<T, B>;
+impl<T: Send> GenericWorker<T> for st3::fifo::Worker<T> {
+    type S = st3::fifo::Stealer<T>;
 
     fn new() -> Self {
-        Self::new()
+        Self::new(256)
     }
     fn push(&self, item: T) -> Result<(), T> {
         self.push(item)
@@ -77,8 +77,8 @@ impl<T: Send, B: st3::Buffer<T>> GenericWorker<T> for st3::fifo::Worker<T, B> {
         self.stealer()
     }
 }
-impl<T: Send, B: st3::Buffer<T>> GenericStealer<T> for st3::fifo::Stealer<T, B> {
-    type W = st3::fifo::Worker<T, B>;
+impl<T: Send> GenericStealer<T> for st3::fifo::Stealer<T> {
+    type W = st3::fifo::Worker<T>;
 
     fn steal_batch_and_pop(&self, worker: &Self::W) -> Result<T, GenericStealError> {
         // The maximum number of tasks to be stolen is limited in order to match

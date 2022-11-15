@@ -28,7 +28,7 @@ pub(crate) mod cell {
 #[cfg(not(st3_loom))]
 pub(crate) mod cell {
     #[derive(Debug)]
-    pub struct UnsafeCell<T>(core::cell::UnsafeCell<T>);
+    pub(crate) struct UnsafeCell<T>(core::cell::UnsafeCell<T>);
 
     #[allow(dead_code)]
     impl<T> UnsafeCell<T> {

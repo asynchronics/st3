@@ -32,10 +32,10 @@ pub fn push_pop<T, W: GenericWorker<usize>, const N: usize>(name: &str, c: &mut 
 }
 
 pub fn push_pop_small_batch_st3_fifo(c: &mut Criterion) {
-    push_pop::<usize, st3::fifo::Worker<_, st3::B256>, 64>("small_batch-st3_fifo", c);
+    push_pop::<usize, st3::fifo::Worker<_>, 64>("small_batch-st3_fifo", c);
 }
 pub fn push_pop_small_batch_st3_lifo(c: &mut Criterion) {
-    push_pop::<usize, st3::lifo::Worker<_, st3::B256>, 64>("small_batch-st3_lifo", c);
+    push_pop::<usize, st3::lifo::Worker<_>, 64>("small_batch-st3_lifo", c);
 }
 pub fn push_pop_small_batch_tokio(c: &mut Criterion) {
     push_pop::<usize, tokio_queue::Local<_>, 64>("small_batch-tokio", c);
@@ -47,10 +47,10 @@ pub fn push_pop_small_batch_crossbeam_lifo(c: &mut Criterion) {
     push_pop::<usize, CrossbeamLifoWorker<_>, 64>("small_batch-crossbeam_lifo", c);
 }
 pub fn push_pop_large_batch_st3_fifo(c: &mut Criterion) {
-    push_pop::<usize, st3::fifo::Worker<_, st3::B256>, 256>("large_batch-st3_fifo", c);
+    push_pop::<usize, st3::fifo::Worker<_>, 256>("large_batch-st3_fifo", c);
 }
 pub fn push_pop_large_batch_st3_lifo(c: &mut Criterion) {
-    push_pop::<usize, st3::lifo::Worker<_, st3::B256>, 256>("large_batch-st3_lifo", c);
+    push_pop::<usize, st3::lifo::Worker<_>, 256>("large_batch-st3_lifo", c);
 }
 pub fn push_pop_large_batch_tokio(c: &mut Criterion) {
     push_pop::<usize, tokio_queue::Local<_>, 256>("large_batch-tokio", c);
@@ -206,10 +206,10 @@ pub fn executor<T, W: GenericWorker<u64> + 'static>(name: &str, c: &mut Criterio
     });
 }
 pub fn executor_st3_fifo(c: &mut Criterion) {
-    executor::<usize, st3::fifo::Worker<_, st3::B256>>("st3_fifo", c);
+    executor::<usize, st3::fifo::Worker<_>>("st3_fifo", c);
 }
 pub fn executor_st3_lifo(c: &mut Criterion) {
-    executor::<usize, st3::lifo::Worker<_, st3::B256>>("st3_lifo", c);
+    executor::<usize, st3::lifo::Worker<_>>("st3_lifo", c);
 }
 pub fn executor_tokio(c: &mut Criterion) {
     executor::<usize, tokio_queue::Local<_>>("tokio", c);

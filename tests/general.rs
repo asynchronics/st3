@@ -2,12 +2,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::spawn;
 
-use st3::{fifo, lifo, Buffer, StealError};
+use st3::{fifo, lifo, StealError};
 
 // Rotates the internal ring buffer indices by `n` (FIFO queue).
-fn fifo_rotate<T: Default + std::fmt::Debug, B: Buffer<T>>(worker: &fifo::Worker<T, B>, n: usize) {
+fn fifo_rotate<T: Default + std::fmt::Debug>(worker: &fifo::Worker<T>, n: usize) {
     let stealer = worker.stealer();
-    let dummy_worker = fifo::Worker::<T, st3::B2>::new();
+    let dummy_worker = fifo::Worker::<T>::new(2);
 
     for _ in 0..n {
         worker.push(T::default()).unwrap();
@@ -16,9 +16,9 @@ fn fifo_rotate<T: Default + std::fmt::Debug, B: Buffer<T>>(worker: &fifo::Worker
 }
 
 // Rotates the internal ring buffer indices by `n` (LIFO queue).
-fn lifo_rotate<T: Default + std::fmt::Debug, B: Buffer<T>>(worker: &lifo::Worker<T, B>, n: usize) {
+fn lifo_rotate<T: Default + std::fmt::Debug>(worker: &lifo::Worker<T>, n: usize) {
     let stealer = worker.stealer();
-    let dummy_worker = lifo::Worker::<T, st3::B2>::new();
+    let dummy_worker = lifo::Worker::<T>::new(2);
 
     for _ in 0..n {
         worker.push(T::default()).unwrap();
@@ -35,8 +35,8 @@ fn fifo_single_threaded_steal() {
     };
 
     for &rotation in ROTATIONS {
-        let worker1 = fifo::Worker::<_, st3::B128>::new();
-        let worker2 = fifo::Worker::<_, st3::B128>::new();
+        let worker1 = fifo::Worker::new(128);
+        let worker2 = fifo::Worker::new(128);
         let stealer1 = worker1.stealer();
         fifo_rotate(&worker1, rotation);
         fifo_rotate(&worker2, rotation);
@@ -64,8 +64,8 @@ fn lifo_single_threaded_steal() {
     };
 
     for &rotation in ROTATIONS {
-        let worker1 = lifo::Worker::<_, st3::B128>::new();
-        let worker2 = lifo::Worker::<_, st3::B128>::new();
+        let worker1 = lifo::Worker::new(128);
+        let worker2 = lifo::Worker::new(128);
         let stealer1 = worker1.stealer();
         lifo_rotate(&worker1, rotation);
         lifo_rotate(&worker2, rotation);
@@ -93,7 +93,7 @@ fn fifo_self_steal() {
     };
 
     for &rotation in ROTATIONS {
-        let worker = fifo::Worker::<_, st3::B128>::new();
+        let worker = fifo::Worker::new(128);
         fifo_rotate(&worker, rotation);
         let stealer = worker.stealer();
 
@@ -119,7 +119,7 @@ fn lifo_self_steal() {
     };
 
     for &rotation in ROTATIONS {
-        let worker = lifo::Worker::<_, st3::B128>::new();
+        let worker = lifo::Worker::new(128);
         lifo_rotate(&worker, rotation);
         let stealer = worker.stealer();
 
@@ -145,8 +145,8 @@ fn fifo_drain_steal() {
     };
 
     for &rotation in ROTATIONS {
-        let worker = fifo::Worker::<_, st3::B128>::new();
-        let dummy_worker = fifo::Worker::<_, st3::B128>::new();
+        let worker = fifo::Worker::new(128);
+        let dummy_worker = fifo::Worker::new(128);
         let stealer = worker.stealer();
         fifo_rotate(&worker, rotation);
 
@@ -181,8 +181,8 @@ fn lifo_drain_steal() {
     };
 
     for &rotation in ROTATIONS {
-        let worker = lifo::Worker::<_, st3::B128>::new();
-        let dummy_worker = lifo::Worker::<_, st3::B128>::new();
+        let worker = lifo::Worker::new(128);
+        let dummy_worker = lifo::Worker::new(128);
         let stealer = worker.stealer();
         lifo_rotate(&worker, rotation);
 
@@ -217,7 +217,7 @@ fn fifo_extend_basic() {
     };
 
     for &rotation in ROTATIONS {
-        let worker = fifo::Worker::<_, st3::B128>::new();
+        let worker = fifo::Worker::new(128);
         fifo_rotate(&worker, rotation);
 
         let initial_capacity = worker.spare_capacity();
@@ -243,7 +243,7 @@ fn lifo_extend_basic() {
     };
 
     for &rotation in ROTATIONS {
-        let worker = lifo::Worker::<_, st3::B128>::new();
+        let worker = lifo::Worker::new(128);
         lifo_rotate(&worker, rotation);
 
         let initial_capacity = worker.spare_capacity();
@@ -269,7 +269,7 @@ fn fifo_extend_overflow() {
     };
 
     for &rotation in ROTATIONS {
-        let worker = fifo::Worker::<_, st3::B128>::new();
+        let worker = fifo::Worker::new(128);
         fifo_rotate(&worker, rotation);
 
         let initial_capacity = worker.spare_capacity();
@@ -294,7 +294,7 @@ fn lifo_extend_overflow() {
     };
 
     for &rotation in ROTATIONS {
-        let worker = lifo::Worker::<_, st3::B128>::new();
+        let worker = lifo::Worker::new(128);
         lifo_rotate(&worker, rotation);
 
         let initial_capacity = worker.spare_capacity();
@@ -317,7 +317,7 @@ macro_rules! multi_threaded_steal {
             const N: usize = if cfg!(miri) { 200 } else { 80_000_000 };
 
             let counter = Arc::new(AtomicUsize::new(0));
-            let worker = $flavor::Worker::<_, st3::B128>::new();
+            let worker = $flavor::Worker::new(128);
             let stealer = worker.stealer();
 
             let counter0 = counter.clone();
@@ -354,13 +354,13 @@ macro_rules! multi_threaded_steal {
             //
             // Repeatedly steal a random number of items.
             fn steal_periodically(
-                stealer: $flavor::Stealer<usize, st3::B128>,
+                stealer: $flavor::Stealer<usize>,
                 counter: Arc<AtomicUsize>,
                 rng_seed: u64,
             ) -> Vec<usize> {
                 let mut stats = vec![0; N];
                 let mut rng = oorandom::Rand32::new(rng_seed);
-                let dest_worker = $flavor::Worker::<_, st3::B128>::new();
+                let dest_worker = $flavor::Worker::new(128);
 
                 loop {
                     if let Ok((i, _)) = stealer
@@ -400,3 +400,25 @@ macro_rules! multi_threaded_steal {
 }
 multi_threaded_steal!(fifo, fifo_multi_threaded_steal);
 multi_threaded_steal!(lifo, lifo_multi_threaded_steal);
+
+macro_rules! queue_capacity {
+    ($flavor:ident, $test_name:ident) => {
+        #[test]
+        fn $test_name() {
+            for (min_capacity, expected_capacity) in [(0, 1), (1, 1), (3, 4), (8, 8), (100, 128)] {
+                let worker = $flavor::Worker::new(min_capacity);
+
+                assert_eq!(worker.capacity(), expected_capacity);
+                assert_eq!(worker.spare_capacity(), expected_capacity);
+                for _ in 0..expected_capacity {
+                    assert!(worker.push(42).is_ok())
+                }
+                assert!(worker.push(42).is_err());
+                assert_eq!(worker.spare_capacity(), 0);
+            }
+        }
+    };
+}
+
+queue_capacity!(fifo, fifo_queue_capacity);
+queue_capacity!(lifo, lifo_queue_capacity);

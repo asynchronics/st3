@@ -11,11 +11,11 @@ macro_rules! loom_basic_steal {
             const ITEM_COUNT_PER_LOOP: usize = 3;
 
             loom::model(|| {
-                let worker = $flavor::Worker::<usize, st3::B4>::new();
+                let worker = $flavor::Worker::<usize>::new(4);
                 let stealer = worker.stealer();
 
                 let th = thread::spawn(move || {
-                    let dest_worker = $flavor::Worker::<usize, st3::B4>::new();
+                    let dest_worker = $flavor::Worker::<usize>::new(4);
                     let mut n = 0;
 
                     for _ in 0..3 {
@@ -69,11 +69,11 @@ macro_rules! loom_drain_overflow {
             const ITEM_COUNT: usize = 7;
 
             loom::model(|| {
-                let worker = $flavor::Worker::<usize, st3::B4>::new();
+                let worker = $flavor::Worker::<usize>::new(4);
                 let stealer = worker.stealer();
 
                 let th = thread::spawn(move || {
-                    let dest_worker = $flavor::Worker::<usize, st3::B4>::new();
+                    let dest_worker = $flavor::Worker::<usize>::new(4);
                     let mut n = 0;
 
                     let _ = stealer.steal(&dest_worker, |n| n - n / 2);
@@ -131,8 +131,8 @@ macro_rules! loom_multi_stealer {
         fn $test_name() {
             const ITEM_COUNT: usize = 5;
 
-            fn steal_half(stealer: $flavor::Stealer<usize, st3::B4>) -> usize {
-                let dest_worker = $flavor::Worker::<usize, st3::B4>::new();
+            fn steal_half(stealer: $flavor::Stealer<usize>) -> usize {
+                let dest_worker = $flavor::Worker::<usize>::new(4);
 
                 let _ = stealer.steal(&dest_worker, |n| n - n / 2);
 
@@ -145,7 +145,7 @@ macro_rules! loom_multi_stealer {
             }
 
             loom::model(|| {
-                let worker = $flavor::Worker::<usize, st3::B4>::new();
+                let worker = $flavor::Worker::<usize>::new(4);
                 let stealer1 = worker.stealer();
                 let stealer2 = worker.stealer();
 
@@ -180,8 +180,8 @@ macro_rules! loom_chained_steal {
         #[test]
         fn $test_name() {
             loom::model(|| {
-                let w1 = $flavor::Worker::<usize, st3::B4>::new();
-                let w2 = $flavor::Worker::<usize, st3::B4>::new();
+                let w1 = $flavor::Worker::<usize>::new(4);
+                let w2 = $flavor::Worker::<usize>::new(4);
                 let s1 = w1.stealer();
                 let s2 = w2.stealer();
 
@@ -191,7 +191,7 @@ macro_rules! loom_chained_steal {
                 }
 
                 let th = thread::spawn(move || {
-                    let dest_worker = $flavor::Worker::<usize, st3::B4>::new();
+                    let dest_worker = $flavor::Worker::<usize>::new(4);
                     let _ = s1.steal(&dest_worker, |n| n - n / 2);
 
                     while dest_worker.pop().is_some() {}
@@ -217,8 +217,8 @@ macro_rules! loom_push_and_steal {
         // A variant of multi-stealer with concurrent push.
         #[test]
         fn $test_name() {
-            fn steal_half(stealer: $flavor::Stealer<usize, st3::B4>) -> usize {
-                let dest_worker = $flavor::Worker::<usize, st3::B4>::new();
+            fn steal_half(stealer: $flavor::Stealer<usize>) -> usize {
+                let dest_worker = $flavor::Worker::<usize>::new(4);
 
                 match stealer.steal(&dest_worker, |n| n - n / 2) {
                     Ok(n) => n,
@@ -227,7 +227,7 @@ macro_rules! loom_push_and_steal {
             }
 
             loom::model(|| {
-                let worker = $flavor::Worker::<usize, st3::B4>::new();
+                let worker = $flavor::Worker::<usize>::new(4);
                 let stealer1 = worker.stealer();
                 let stealer2 = worker.stealer();
 
@@ -258,8 +258,8 @@ macro_rules! loom_extend {
         // Attempts extending the queue based on `Worker::free_capacity`.
         #[test]
         fn $test_name() {
-            fn steal_half(stealer: $flavor::Stealer<usize, st3::B4>) -> usize {
-                let dest_worker = $flavor::Worker::<usize, st3::B4>::new();
+            fn steal_half(stealer: $flavor::Stealer<usize>) -> usize {
+                let dest_worker = $flavor::Worker::<usize>::new(4);
 
                 match stealer.steal(&dest_worker, |n| n - n / 2) {
                     Ok(n) => n,
@@ -268,7 +268,7 @@ macro_rules! loom_extend {
             }
 
             loom::model(|| {
-                let worker = $flavor::Worker::<usize, st3::B4>::new();
+                let worker = $flavor::Worker::<usize>::new(4);
                 let stealer1 = worker.stealer();
                 let stealer2 = worker.stealer();
 

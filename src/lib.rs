@@ -1,7 +1,7 @@
 //! # St³ — Stealing Static Stack
 //!
 //! Very fast lock-free, bounded, work-stealing queue with FIFO stealing and
-//! LIFO of FIFO semantic for the worker thread.
+//! LIFO or FIFO semantic for the worker thread.
 //!
 //! The `Worker` handle enables push and pop operations from a single thread,
 //! while `Stealer` handles can be shared between threads to perform FIFO
@@ -16,11 +16,10 @@
 //!
 //! ```
 //! use std::thread;
-//! use st3::B256;
 //! use st3::lifo::Worker;
 //!
 //! // Push 4 items into a queue of capacity 256.
-//! let worker = Worker::<_, B256>::new();
+//! let worker = Worker::new(256);
 //! worker.push("a").unwrap();
 //! worker.push("b").unwrap();
 //! worker.push("c").unwrap();
@@ -29,7 +28,7 @@
 //! // Steal items concurrently.
 //! let stealer = worker.stealer();
 //! let th = thread::spawn(move || {
-//!     let other_worker = Worker::<_, B256>::new();
+//!     let other_worker = Worker::new(256);
 //!
 //!     // Try to steal half the items and return the actual count of stolen items.
 //!     match stealer.steal(&other_worker, |n| n/2) {
@@ -53,12 +52,16 @@
 
 extern crate alloc;
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+
 use core::fmt;
+use core::mem::MaybeUninit;
 
 use config::{UnsignedLong, UnsignedShort};
 
-pub mod buffers;
-pub use buffers::*;
+use crate::loom_exports::cell::UnsafeCell;
+
 mod config;
 pub mod fifo;
 pub mod lifo;
@@ -94,4 +97,16 @@ fn unpack(value: UnsignedLong) -> (UnsignedShort, UnsignedShort) {
         (value >> UnsignedShort::BITS) as UnsignedShort,
         value as UnsignedShort,
     )
+}
+
+fn allocate_buffer<T>(len: usize) -> Box<[UnsafeCell<MaybeUninit<T>>]> {
+    let mut buffer = Vec::with_capacity(len);
+
+    // Note: resizing the vector would normally be an O(N) operation due to
+    // initialization, but initialization is optimized out in release mode since
+    // an `UnsafeCell<MaybeUninit>` does not actually need to be initialized as
+    // `UnsafeCell` is `repr(transparent)`.
+    buffer.resize_with(len, || UnsafeCell::new(MaybeUninit::uninit()));
+
+    buffer.into_boxed_slice()
 }

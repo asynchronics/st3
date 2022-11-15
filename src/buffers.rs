@@ -79,10 +79,10 @@ macro_rules! make_buffer {
 }
 
 // Define buffer capacities up to 2^15, which is the maximum that can be
-// supported when the `long_counter` feature is disabled since buffer positions
-// are then 16-bit wide (note that 1 bit is required for disambiguation between
-// full and empty buffer). We could possibly define capacities up to 2^31 when
-// `long_counter` is enabled, but this is probably enough in practice.
+// supported on targets that have only 32-bit atomics since buffer positions are
+// then 16-bit wide (note that 1 bit is required for disambiguation between full
+// and empty buffer). We could possibly define capacities up to 2^31 when 64-bit
+// atomics are supported, but this is probably enough in practice.
 make_buffer!(B2, 2);
 make_buffer!(B4, 4);
 make_buffer!(B8, 8);

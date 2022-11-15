@@ -20,10 +20,6 @@ keywords = ["queue", "stack", "bounded", "lock-free", "work-stealing"]
 autotests = false
 autobenches = false
 
-[features]
-default = ["long_counter"]
-long_counter = []
-
 [dependencies]
 cache-padded = "1.1"
 

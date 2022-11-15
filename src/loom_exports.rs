@@ -2,10 +2,10 @@
 #[allow(unused_imports)]
 pub(crate) mod sync {
     pub(crate) mod atomic {
-        #[cfg(not(any(target_pointer_width = "64", feature = "long_counter")))]
+        #[cfg(not(target_has_atomic = "64"))]
         pub(crate) use loom::sync::atomic::AtomicU16;
         pub(crate) use loom::sync::atomic::AtomicU32;
-        #[cfg(any(target_pointer_width = "64", feature = "long_counter"))]
+        #[cfg(target_has_atomic = "64")]
         pub(crate) use loom::sync::atomic::AtomicU64;
     }
 }
@@ -13,10 +13,10 @@ pub(crate) mod sync {
 #[allow(unused_imports)]
 pub(crate) mod sync {
     pub(crate) mod atomic {
-        #[cfg(not(any(target_pointer_width = "64", feature = "long_counter")))]
+        #[cfg(not(target_has_atomic = "64"))]
         pub(crate) use core::sync::atomic::AtomicU16;
         pub(crate) use core::sync::atomic::AtomicU32;
-        #[cfg(any(target_pointer_width = "64", feature = "long_counter"))]
+        #[cfg(target_has_atomic = "64")]
         pub(crate) use core::sync::atomic::AtomicU64;
     }
 }

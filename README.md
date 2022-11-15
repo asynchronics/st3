@@ -156,7 +156,7 @@ Test CPU: i5-7200U.
 | executor  | Crossbeam Deque (Chase-Lev) LIFO |    304 µs    |
 
 
-## (Mis)Features
+## ABA
 
 Just like the Tokio queue, the *St³* queues are susceptible to [ABA]. For
 instance, in a naive implementation, if a steal operation was preempted at the
@@ -166,20 +166,12 @@ stealer could attempt to steal more items than are available. ABA is overcome by
 using buffer positions that can index many times the actual buffer capacity so
 as to increase the cycle period beyond worst-case preemption.
 
-For this reason, *St³* will by default use 32-bit buffer positions, which should
-in practice provide full resilience against ABA. This requires the use of 64-bit
-atomics, however, which on 32-bit targets may not be supported (e.g. MIPS) or
-may be slower (e.g. ARMv7). If you like to live dangerously, you can still elect
-to disable the default `long_counter` feature and use 16-bit buffer positions
-instead:
-
-```toml
-[dependencies]
-st3 = { version = "0.3.1", default-features = false }
-```
-
-Note that disabling this feature has no effect on 64-bit targets: those will
-still use 32-bit buffer positions.
+For this reason, *St³* will use 32-bit buffer positions whenever the target
+supports 64-bit atomics, which should in practice provide full resilience
+against ABA. Targets that only support 32-bit atomics (e.g. MIPS) will instead
+use 16-bit buffer positions, which in theory introduces a very remote risk of
+ABA. Note that Tokio had been using 16-bit positions for *all* targets up to
+version 1.21.1, so you probably should not worry too much about it.
 
 [ABA]: https://en.wikipedia.org/wiki/ABA_problem
 

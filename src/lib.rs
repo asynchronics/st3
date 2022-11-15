@@ -48,10 +48,12 @@
 //! let steal_count = th.join().unwrap();
 //! assert_eq!(pop_count + steal_count, 4);
 //! ```
-
 #![warn(missing_docs, missing_debug_implementations, unreachable_pub)]
+#![no_std]
 
-use std::fmt;
+extern crate alloc;
+
+use core::fmt;
 
 use config::{UnsignedLong, UnsignedShort};
 

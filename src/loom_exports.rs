@@ -14,10 +14,10 @@ pub(crate) mod sync {
 pub(crate) mod sync {
     pub(crate) mod atomic {
         #[cfg(not(any(target_pointer_width = "64", feature = "long_counter")))]
-        pub(crate) use std::sync::atomic::AtomicU16;
-        pub(crate) use std::sync::atomic::AtomicU32;
+        pub(crate) use core::sync::atomic::AtomicU16;
+        pub(crate) use core::sync::atomic::AtomicU32;
         #[cfg(any(target_pointer_width = "64", feature = "long_counter"))]
-        pub(crate) use std::sync::atomic::AtomicU64;
+        pub(crate) use core::sync::atomic::AtomicU64;
     }
 }
 
@@ -28,12 +28,12 @@ pub(crate) mod cell {
 #[cfg(not(st3_loom))]
 pub(crate) mod cell {
     #[derive(Debug)]
-    pub struct UnsafeCell<T>(std::cell::UnsafeCell<T>);
+    pub struct UnsafeCell<T>(core::cell::UnsafeCell<T>);
 
     #[allow(dead_code)]
     impl<T> UnsafeCell<T> {
         pub(crate) fn new(data: T) -> UnsafeCell<T> {
-            UnsafeCell(std::cell::UnsafeCell::new(data))
+            UnsafeCell(core::cell::UnsafeCell::new(data))
         }
         pub(crate) fn with<R>(&self, f: impl FnOnce(*const T) -> R) -> R {
             f(self.0.get())

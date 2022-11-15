@@ -1,7 +1,9 @@
 //! Internal queue buffers of various sizes.
 
-use std::fmt::Debug;
-use std::mem::MaybeUninit;
+use alloc::boxed::Box;
+
+use core::fmt::Debug;
+use core::mem::MaybeUninit;
 
 use crate::config::UnsignedShort;
 use crate::loom_exports::cell::UnsafeCell;

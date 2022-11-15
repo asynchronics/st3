@@ -36,12 +36,14 @@
 //! let steal_count = th.join().unwrap();
 //! assert_eq!(pop_count + steal_count, 4);
 //! ```
-use std::iter::FusedIterator;
-use std::marker::PhantomData;
-use std::mem::{drop, MaybeUninit};
-use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use std::sync::Arc;
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+
+use core::iter::FusedIterator;
+use core::marker::PhantomData;
+use core::mem::{drop, MaybeUninit};
+use core::panic::{RefUnwindSafe, UnwindSafe};
+use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 use cache_padded::CachePadded;
 

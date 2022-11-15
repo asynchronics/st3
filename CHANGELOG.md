@@ -1,7 +1,17 @@
-# ?.?.? (????-??-??)
+# 0.4.0 (2022-11-15)
 
 - Revert the fix added in 0.3.1 as the code was actually correct and the fix was
   unnecessary (comments added).
+- Add a FIFO queue variant in the `fifo` module with the same API, based on the
+  Tokio queue.
+
+## :warning: Breaking changes
+
+- Make the queue capacity a run-time parameter,
+- Move the LIFO queue to a `lifo` module.
+- Choose buffer indexing integer size based on `target_has_atomic` and remove
+  the `long_counter` feature.
+- Bump the MSRV to 1.60 to enable the use of `target_has_atomic`.
 
 # 0.3.1 (2022-09-20)
 

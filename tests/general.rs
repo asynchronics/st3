@@ -26,6 +26,27 @@ fn lifo_rotate<T: Default + std::fmt::Debug>(worker: &lifo::Worker<T>, n: usize)
     }
 }
 
+
+#[test]
+fn fifo_is_same_as() {
+    let worker_a = fifo::Worker::<u32>::new(32);
+    let worker_b = fifo::Worker::<u32>::new(32);
+    assert!(worker_a.is_same_as(&worker_a.stealer()));
+    assert!(!worker_b.is_same_as(&worker_a.stealer()));
+    assert!(!worker_a.is_same_as(&worker_b.stealer()));
+    assert!(worker_b.is_same_as(&worker_b.stealer()));
+}
+
+#[test]
+fn lifo_is_same_as() {
+    let worker_a = lifo::Worker::<u32>::new(32);
+    let worker_b = lifo::Worker::<u32>::new(32);
+    assert!(worker_a.is_same_as(&worker_a.stealer()));
+    assert!(!worker_b.is_same_as(&worker_a.stealer()));
+    assert!(!worker_a.is_same_as(&worker_b.stealer()));
+    assert!(worker_b.is_same_as(&worker_b.stealer()));
+}
+
 #[test]
 fn fifo_single_threaded_steal() {
     const ROTATIONS: &[usize] = if cfg!(miri) {

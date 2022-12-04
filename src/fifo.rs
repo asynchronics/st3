@@ -262,6 +262,11 @@ impl<T> Worker<T> {
         Worker { queue }
     }
 
+    /// Checks if the [`Worker`] points to the same underlying queue as a [`Stealer`].
+    pub fn is_same_as(&self, stealer: &Stealer<T>) -> bool {
+        Arc::ptr_eq(&self.queue, &stealer.queue)
+    }
+
     /// Creates a new `Stealer` handle associated to this `Worker`.
     ///
     /// An arbitrary number of `Stealer` handles can be created, either using

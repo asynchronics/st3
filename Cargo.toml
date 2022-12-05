@@ -21,7 +21,7 @@ autotests = false
 autobenches = false
 
 [dependencies]
-cache-padded = "1.1"
+crossbeam-utils = { version = "0.8.14", default-features = false }
 
 [dev-dependencies]
 criterion = "0.3"

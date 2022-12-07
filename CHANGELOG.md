@@ -2,8 +2,10 @@
 
 - Make it possible to obtain a reference to a stealer from a worker with
   `stealer_ref` ([#5]).
-- Implement `Eq` and `PartialEq` on stealers.
+- Implement `Eq` and `PartialEq` on stealers ([#5]).
+- Replace the soon-to-be-deprecated `cache-padded` crate with `crossbeam-utils` ([#4])
 
+[#4]: https://github.com/asynchronics/st3/pull/4
 [#5]: https://github.com/asynchronics/st3/pull/5
 
 # 0.4.0 (2022-11-15)

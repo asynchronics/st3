@@ -34,7 +34,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-st3 = "0.4.0"
+st3 = "0.4.1"
 ```
 
 

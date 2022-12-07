@@ -1,3 +1,11 @@
+# 0.4.1 (2022-12-07)
+
+- Make it possible to obtain a reference to a stealer from a worker with
+  `stealer_ref` ([#5]).
+- Implement `Eq` and `PartialEq` on stealers.
+
+[#5]: https://github.com/asynchronics/st3/pull/5
+
 # 0.4.0 (2022-11-15)
 
 - Revert the fix added in 0.3.1 as the code was actually correct and the fix was

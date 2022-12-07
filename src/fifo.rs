@@ -38,8 +38,9 @@
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 
+use core::alloc::Layout;
 use core::iter::FusedIterator;
-use core::mem::{drop, MaybeUninit};
+use core::mem::{drop, transmute, MaybeUninit};
 use core::panic::{RefUnwindSafe, UnwindSafe};
 use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 
@@ -272,6 +273,26 @@ impl<T> Worker<T> {
         }
     }
 
+    /// Creates a reference to a `Stealer` handle associated to this `Worker`.
+    ///
+    /// This is a zero-cost reference-to-reference conversion: the reference
+    /// count to the underlying queue is not modified. The returned reference
+    /// can in particular be used to perform a cheap equality check with another
+    /// `Stealer` and verify that it is associated to the same `Worker`.
+    pub fn stealer_ref(&self) -> &Stealer<T> {
+        // Sanity checks to assess that `queue` has indeed the size and
+        // alignment of a `Stealer` (this assert is optimized in release mode).
+        assert_eq!(Layout::for_value(&self.queue), Layout::new::<Stealer<T>>());
+
+        // Safety: `self.queue` has the size and alignment of `Stealer` since
+        // the latter is a `repr(transparent)` type over an `Arc<Queue<T>>`. The
+        // lifetime of the returned reference is bounded by the lifetime of
+        // `&self`. The soundness of providing a `Stealer` from a `Worker` is
+        // already assumed by the `stealer()` method, so providing a short-lived
+        // reference to a `Stealer` does not in itself modify safety guarantees.
+        unsafe { transmute::<&'_ Arc<Queue<T>>, &'_ Stealer<T>>(&self.queue) }
+    }
+
     /// Returns the capacity of the queue.
     pub fn capacity(&self) -> usize {
         self.queue.capacity() as usize
@@ -337,8 +358,9 @@ impl<T> Worker<T> {
     ///
     /// It is the responsibility of the caller to ensure that there is enough
     /// spare capacity to accommodate all iterator items, for instance by
-    /// calling `[Worker::spare_capacity]` beforehand. Otherwise, the iterator
-    /// is dropped while still holding the items in excess.
+    /// calling [`spare_capacity`](Worker::spare_capacity) beforehand.
+    /// Otherwise, the iterator is dropped while still holding the items in
+    /// excess.
     pub fn extend<I: IntoIterator<Item = T>>(&self, iter: I) {
         let stealer_head = unpack(self.queue.heads.load(Acquire)).1;
         let mut tail = self.queue.tail.load(Relaxed);
@@ -523,6 +545,7 @@ unsafe impl<'a, T: Send> Sync for Drain<'a, T> {}
 
 /// Handle for multi-threaded stealing operations.
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct Stealer<T> {
     queue: Arc<Queue<T>>,
 }
@@ -692,6 +715,14 @@ impl<T> Clone for Stealer<T> {
         }
     }
 }
+
+impl<T> PartialEq for Stealer<T> {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.queue, &other.queue)
+    }
+}
+
+impl<T> Eq for Stealer<T> {}
 
 impl<T> UnwindSafe for Stealer<T> {}
 impl<T> RefUnwindSafe for Stealer<T> {}

@@ -43,7 +43,7 @@ use core::mem::{drop, MaybeUninit};
 use core::panic::{RefUnwindSafe, UnwindSafe};
 use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 
-use cache_padded::CachePadded;
+use crossbeam_utils::CachePadded;
 
 use crate::config::{AtomicUnsignedLong, AtomicUnsignedShort, UnsignedShort};
 use crate::loom_exports::cell::UnsafeCell;

@@ -26,6 +26,42 @@ fn lifo_rotate<T: Default + std::fmt::Debug>(worker: &lifo::Worker<T>, n: usize)
     }
 }
 
+macro_rules! stealer_equality {
+    ($flavor:ident, $test_name:ident) => {
+        #[test]
+        fn $test_name() {
+            let worker_a = $flavor::Worker::<u32>::new(32);
+            let worker_b = $flavor::Worker::<u32>::new(32);
+
+            assert_eq!(worker_a.stealer(), worker_a.stealer());
+            assert_ne!(worker_b.stealer(), worker_a.stealer());
+            assert_eq!(worker_b.stealer(), worker_b.stealer());
+            assert_ne!(worker_a.stealer(), worker_b.stealer());
+        }
+    };
+}
+
+stealer_equality!(fifo, fifo_stealer_equality);
+stealer_equality!(lifo, lifo_stealer_equality);
+
+macro_rules! stealer_ref_equality {
+    ($flavor:ident, $test_name:ident) => {
+        #[test]
+        fn $test_name() {
+            let worker_a = $flavor::Worker::<u32>::new(32);
+            let worker_b = $flavor::Worker::<u32>::new(32);
+
+            assert_eq!(worker_a.stealer_ref(), &worker_a.stealer());
+            assert_ne!(worker_b.stealer_ref(), &worker_a.stealer());
+            assert_eq!(worker_b.stealer_ref(), &worker_b.stealer());
+            assert_ne!(worker_a.stealer_ref(), &worker_b.stealer());
+        }
+    };
+}
+
+stealer_ref_equality!(fifo, fifo_ref_stealer_equality);
+stealer_ref_equality!(lifo, lifo_ref_stealer_equality);
+
 #[test]
 fn fifo_single_threaded_steal() {
     const ROTATIONS: &[usize] = if cfg!(miri) {

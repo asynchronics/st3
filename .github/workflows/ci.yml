@@ -25,22 +25,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
 
       - name: Run cargo check
-        run: cargo check --benches
-
-  check-no-atomic-u64:
-    name: Check (no AtomicU64)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
-
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: mips-unknown-linux-gnu
-
-      - name: Run cargo check
-        run: cargo check --target mips-unknown-linux-gnu --no-default-features
+        run: cargo check
 
   test:
     name: Test suite
@@ -71,6 +56,23 @@ jobs:
           LOOM_MAX_PREEMPTIONS: 3 
           RUSTFLAGS: --cfg st3_loom
 
+  miri:
+    name: Miri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: Run cargo miri
+        run: cargo miri test
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance
+      
   lints:
     name: Lints
     runs-on: ubuntu-latest

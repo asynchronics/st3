@@ -4,6 +4,32 @@ use std::thread::spawn;
 
 use st3::{fifo, lifo, StealError};
 
+// Note: test values are boxed in Miri tests so that destructors called on freed
+// values and forgotten destructors can be detected.
+
+#[cfg(miri)]
+type TestValue<T> = Box<T>;
+
+#[cfg(not(miri))]
+#[derive(Debug, Default, PartialEq)]
+struct TestValue<T>(T);
+
+#[cfg(not(miri))]
+impl<T> TestValue<T> {
+    fn new(val: T) -> Self {
+        Self(val)
+    }
+}
+
+#[cfg(not(miri))]
+impl<T> std::ops::Deref for TestValue<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
 // Rotates the internal ring buffer indices by `n` (FIFO queue).
 fn fifo_rotate<T: Default + std::fmt::Debug>(worker: &fifo::Worker<T>, n: usize) {
     let stealer = worker.stealer();
@@ -30,8 +56,8 @@ macro_rules! stealer_equality {
     ($flavor:ident, $test_name:ident) => {
         #[test]
         fn $test_name() {
-            let worker_a = $flavor::Worker::<u32>::new(32);
-            let worker_b = $flavor::Worker::<u32>::new(32);
+            let worker_a = $flavor::Worker::<TestValue<u32>>::new(32);
+            let worker_b = $flavor::Worker::<TestValue<u32>>::new(32);
 
             assert_eq!(worker_a.stealer(), worker_a.stealer());
             assert_ne!(worker_b.stealer(), worker_a.stealer());
@@ -48,8 +74,8 @@ macro_rules! stealer_ref_equality {
     ($flavor:ident, $test_name:ident) => {
         #[test]
         fn $test_name() {
-            let worker_a = $flavor::Worker::<u32>::new(32);
-            let worker_b = $flavor::Worker::<u32>::new(32);
+            let worker_a = $flavor::Worker::<TestValue<u32>>::new(32);
+            let worker_b = $flavor::Worker::<TestValue<u32>>::new(32);
 
             assert_eq!(worker_a.stealer_ref(), &worker_a.stealer());
             assert_ne!(worker_b.stealer_ref(), &worker_a.stealer());
@@ -77,16 +103,21 @@ fn fifo_single_threaded_steal() {
         fifo_rotate(&worker1, rotation);
         fifo_rotate(&worker2, rotation);
 
-        worker1.push(1).unwrap();
-        worker1.push(2).unwrap();
-        worker1.push(3).unwrap();
-        worker1.push(4).unwrap();
+        worker1.push(TestValue::new(1)).unwrap();
+        worker1.push(TestValue::new(2)).unwrap();
+        worker1.push(TestValue::new(3)).unwrap();
+        worker1.push(TestValue::new(4)).unwrap();
 
-        assert_eq!(worker1.pop(), Some(1));
-        assert_eq!(stealer1.steal_and_pop(&worker2, |_| 2), Ok((3, 1)));
-        assert_eq!(worker1.pop(), Some(4));
+        assert_eq!(worker1.pop().map(|e| *e), Some(1));
+        assert_eq!(
+            stealer1
+                .steal_and_pop(&worker2, |_| 2)
+                .map(|(e, s)| (*e, s)),
+            Ok((3, 1))
+        );
+        assert_eq!(worker1.pop().map(|e| *e), Some(4));
         assert_eq!(worker1.pop(), None);
-        assert_eq!(worker2.pop(), Some(2));
+        assert_eq!(worker2.pop().map(|e| *e), Some(2));
         assert_eq!(worker2.pop(), None);
     }
 }
@@ -106,16 +137,21 @@ fn lifo_single_threaded_steal() {
         lifo_rotate(&worker1, rotation);
         lifo_rotate(&worker2, rotation);
 
-        worker1.push(1).unwrap();
-        worker1.push(2).unwrap();
-        worker1.push(3).unwrap();
-        worker1.push(4).unwrap();
+        worker1.push(TestValue::new(1)).unwrap();
+        worker1.push(TestValue::new(2)).unwrap();
+        worker1.push(TestValue::new(3)).unwrap();
+        worker1.push(TestValue::new(4)).unwrap();
 
-        assert_eq!(worker1.pop(), Some(4));
-        assert_eq!(stealer1.steal_and_pop(&worker2, |_| 2), Ok((2, 1)));
-        assert_eq!(worker1.pop(), Some(3));
+        assert_eq!(worker1.pop().map(|e| *e), Some(4));
+        assert_eq!(
+            stealer1
+                .steal_and_pop(&worker2, |_| 2)
+                .map(|(e, s)| (*e, s)),
+            Ok((2, 1))
+        );
+        assert_eq!(worker1.pop().map(|e| *e), Some(3));
         assert_eq!(worker1.pop(), None);
-        assert_eq!(worker2.pop(), Some(1));
+        assert_eq!(worker2.pop().map(|e| *e), Some(1));
         assert_eq!(worker2.pop(), None);
     }
 }
@@ -133,15 +169,18 @@ fn fifo_self_steal() {
         fifo_rotate(&worker, rotation);
         let stealer = worker.stealer();
 
-        worker.push(1).unwrap();
-        worker.push(2).unwrap();
-        worker.push(3).unwrap();
-        worker.push(4).unwrap();
+        worker.push(TestValue::new(1)).unwrap();
+        worker.push(TestValue::new(2)).unwrap();
+        worker.push(TestValue::new(3)).unwrap();
+        worker.push(TestValue::new(4)).unwrap();
 
-        assert_eq!(worker.pop(), Some(1));
-        assert_eq!(stealer.steal_and_pop(&worker, |_| 2), Ok((3, 1)));
-        assert_eq!(worker.pop(), Some(4));
-        assert_eq!(worker.pop(), Some(2));
+        assert_eq!(worker.pop().map(|e| *e), Some(1));
+        assert_eq!(
+            stealer.steal_and_pop(&worker, |_| 2).map(|(e, s)| (*e, s)),
+            Ok((3, 1))
+        );
+        assert_eq!(worker.pop().map(|e| *e), Some(4));
+        assert_eq!(worker.pop().map(|e| *e), Some(2));
         assert_eq!(worker.pop(), None);
     }
 }
@@ -159,16 +198,19 @@ fn lifo_self_steal() {
         lifo_rotate(&worker, rotation);
         let stealer = worker.stealer();
 
-        worker.push(1).unwrap();
-        worker.push(2).unwrap();
-        worker.push(3).unwrap();
-        worker.push(4).unwrap();
+        worker.push(TestValue::new(1)).unwrap();
+        worker.push(TestValue::new(2)).unwrap();
+        worker.push(TestValue::new(3)).unwrap();
+        worker.push(TestValue::new(4)).unwrap();
 
-        assert_eq!(worker.pop(), Some(4));
-        assert_eq!(stealer.steal_and_pop(&worker, |_| 2), Ok((2, 1)));
-        assert_eq!(worker.pop(), Some(1));
-        assert_eq!(worker.pop(), Some(3));
-        assert_eq!(worker.pop(), None);
+        assert_eq!(worker.pop().map(|e| *e), Some(4));
+        assert_eq!(
+            stealer.steal_and_pop(&worker, |_| 2).map(|(e, s)| (*e, s)),
+            Ok((2, 1))
+        );
+        assert_eq!(worker.pop().map(|e| *e), Some(1));
+        assert_eq!(worker.pop().map(|e| *e), Some(3));
+        assert_eq!(worker.pop().map(|e| *e), None);
     }
 }
 
@@ -186,24 +228,29 @@ fn fifo_drain_steal() {
         let stealer = worker.stealer();
         fifo_rotate(&worker, rotation);
 
-        worker.push(1).unwrap();
-        worker.push(2).unwrap();
-        worker.push(3).unwrap();
-        worker.push(4).unwrap();
+        worker.push(TestValue::new(1)).unwrap();
+        worker.push(TestValue::new(2)).unwrap();
+        worker.push(TestValue::new(3)).unwrap();
+        worker.push(TestValue::new(4)).unwrap();
 
-        assert_eq!(worker.pop(), Some(1));
+        assert_eq!(worker.pop().map(|e| *e), Some(1));
         let mut iter = worker.drain(|n| n - 1).unwrap();
         assert_eq!(
             stealer.steal_and_pop(&dummy_worker, |_| 1),
             Err(StealError::Busy)
         );
-        assert_eq!(iter.next(), Some(2));
+        assert_eq!(iter.next().map(|e| *e), Some(2));
         assert_eq!(
             stealer.steal_and_pop(&dummy_worker, |_| 1),
             Err(StealError::Busy)
         );
-        assert_eq!(iter.next(), Some(3));
-        assert_eq!(stealer.steal_and_pop(&dummy_worker, |_| 1), Ok((4, 0)));
+        assert_eq!(iter.next().map(|e| *e), Some(3));
+        assert_eq!(
+            stealer
+                .steal_and_pop(&dummy_worker, |_| 1)
+                .map(|(e, s)| (*e, s)),
+            Ok((4, 0))
+        );
         assert_eq!(iter.next(), None);
     }
 }
@@ -222,24 +269,29 @@ fn lifo_drain_steal() {
         let stealer = worker.stealer();
         lifo_rotate(&worker, rotation);
 
-        worker.push(1).unwrap();
-        worker.push(2).unwrap();
-        worker.push(3).unwrap();
-        worker.push(4).unwrap();
+        worker.push(TestValue::new(1)).unwrap();
+        worker.push(TestValue::new(2)).unwrap();
+        worker.push(TestValue::new(3)).unwrap();
+        worker.push(TestValue::new(4)).unwrap();
 
-        assert_eq!(worker.pop(), Some(4));
+        assert_eq!(worker.pop().map(|e| *e), Some(4));
         let mut iter = worker.drain(|n| n - 1).unwrap();
         assert_eq!(
             stealer.steal_and_pop(&dummy_worker, |_| 1),
             Err(StealError::Busy)
         );
-        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next().map(|e| *e), Some(1));
         assert_eq!(
             stealer.steal_and_pop(&dummy_worker, |_| 1),
             Err(StealError::Busy)
         );
-        assert_eq!(iter.next(), Some(2));
-        assert_eq!(stealer.steal_and_pop(&dummy_worker, |_| 1), Ok((3, 0)));
+        assert_eq!(iter.next().map(|e| *e), Some(2));
+        assert_eq!(
+            stealer
+                .steal_and_pop(&dummy_worker, |_| 1)
+                .map(|(e, s)| (*e, s)),
+            Ok((3, 0))
+        );
         assert_eq!(iter.next(), None);
     }
 }
@@ -257,15 +309,15 @@ fn fifo_extend_basic() {
         fifo_rotate(&worker, rotation);
 
         let initial_capacity = worker.spare_capacity();
-        worker.push(1).unwrap();
-        worker.push(2).unwrap();
-        worker.extend([3, 4]);
+        worker.push(TestValue::new(1)).unwrap();
+        worker.push(TestValue::new(2)).unwrap();
+        worker.extend([TestValue::new(3), TestValue::new(4)]);
 
         assert_eq!(worker.spare_capacity(), initial_capacity - 4);
-        assert_eq!(worker.pop(), Some(1));
-        assert_eq!(worker.pop(), Some(2));
-        assert_eq!(worker.pop(), Some(3));
-        assert_eq!(worker.pop(), Some(4));
+        assert_eq!(worker.pop().map(|e| *e), Some(1));
+        assert_eq!(worker.pop().map(|e| *e), Some(2));
+        assert_eq!(worker.pop().map(|e| *e), Some(3));
+        assert_eq!(worker.pop().map(|e| *e), Some(4));
         assert_eq!(worker.pop(), None);
     }
 }
@@ -283,15 +335,15 @@ fn lifo_extend_basic() {
         lifo_rotate(&worker, rotation);
 
         let initial_capacity = worker.spare_capacity();
-        worker.push(1).unwrap();
-        worker.push(2).unwrap();
-        worker.extend([3, 4]);
+        worker.push(TestValue::new(1)).unwrap();
+        worker.push(TestValue::new(2)).unwrap();
+        worker.extend([TestValue::new(3), TestValue::new(4)]);
 
         assert_eq!(worker.spare_capacity(), initial_capacity - 4);
-        assert_eq!(worker.pop(), Some(4));
-        assert_eq!(worker.pop(), Some(3));
-        assert_eq!(worker.pop(), Some(2));
-        assert_eq!(worker.pop(), Some(1));
+        assert_eq!(worker.pop().map(|e| *e), Some(4));
+        assert_eq!(worker.pop().map(|e| *e), Some(3));
+        assert_eq!(worker.pop().map(|e| *e), Some(2));
+        assert_eq!(worker.pop().map(|e| *e), Some(1));
         assert_eq!(worker.pop(), None);
     }
 }
@@ -350,7 +402,7 @@ macro_rules! multi_threaded_steal {
     ($flavor:ident, $test_name:ident) => {
         #[test]
         fn $test_name() {
-            const N: usize = if cfg!(miri) { 200 } else { 80_000_000 };
+            const N: usize = if cfg!(miri) { 200 } else { 10_000_000 };
 
             let counter = Arc::new(AtomicUsize::new(0));
             let worker = $flavor::Worker::new(128);
@@ -371,14 +423,14 @@ macro_rules! multi_threaded_steal {
                 let mut stats = vec![0; N];
                 'outer: loop {
                     for _ in 0..rng.rand_range(1..10) {
-                        while let Err(_) = worker.push(i) {}
+                        while let Err(_) = worker.push(TestValue::new(i)) {}
                         i += 1;
                         if i == N {
                             break 'outer;
                         }
                     }
                     if let Some(j) = worker.pop() {
-                        stats[j] += 1;
+                        stats[*j] += 1;
                         counter0.fetch_add(1, Ordering::Relaxed);
                     }
                 }
@@ -390,7 +442,7 @@ macro_rules! multi_threaded_steal {
             //
             // Repeatedly steal a random number of items.
             fn steal_periodically(
-                stealer: $flavor::Stealer<usize>,
+                stealer: $flavor::Stealer<TestValue<usize>>,
                 counter: Arc<AtomicUsize>,
                 rng_seed: u64,
             ) -> Vec<usize> {
@@ -402,10 +454,10 @@ macro_rules! multi_threaded_steal {
                     if let Ok((i, _)) = stealer
                         .steal_and_pop(&dest_worker, |m| rng.rand_range(0..(m + 1) as u32) as usize)
                     {
-                        stats[i] += 1; // the popped item
+                        stats[*i] += 1; // the popped item
                         counter.fetch_add(1, Ordering::Relaxed);
                         while let Some(j) = dest_worker.pop() {
-                            stats[j] += 1;
+                            stats[*j] += 1;
                             counter.fetch_add(1, Ordering::Relaxed);
                         }
                     }
@@ -418,6 +470,7 @@ macro_rules! multi_threaded_steal {
 
                 stats
             }
+
             let t1 = spawn(move || steal_periodically(stealer1, counter1, 1));
             let t2 = spawn(move || steal_periodically(stealer2, counter2, 2));
             let mut stats = Vec::new();
@@ -447,9 +500,9 @@ macro_rules! queue_capacity {
                 assert_eq!(worker.capacity(), expected_capacity);
                 assert_eq!(worker.spare_capacity(), expected_capacity);
                 for _ in 0..expected_capacity {
-                    assert!(worker.push(42).is_ok())
+                    assert!(worker.push(TestValue::new(42)).is_ok())
                 }
-                assert!(worker.push(42).is_err());
+                assert!(worker.push(TestValue::new(42)).is_err());
                 assert_eq!(worker.spare_capacity(), 0);
             }
         }

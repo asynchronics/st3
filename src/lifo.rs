@@ -40,7 +40,7 @@ use alloc::sync::Arc;
 
 use core::alloc::Layout;
 use core::iter::FusedIterator;
-use core::mem::{drop, transmute, MaybeUninit};
+use core::mem::{transmute, MaybeUninit};
 use core::panic::{RefUnwindSafe, UnwindSafe};
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
@@ -324,8 +324,8 @@ impl<T> Worker<T> {
     /// can in particular be used to perform a cheap equality check with another
     /// `Stealer` and verify that it is associated to the same `Worker`.
     pub fn stealer_ref(&self) -> &Stealer<T> {
-        // Sanity checks to assess that `queue` has indeed the size and
-        // alignment of a `Stealer` (this assert is optimized in release mode).
+        // Sanity check to assess that `queue` has indeed the size and alignment
+        // of a `Stealer` (this assert is optimized away in release mode).
         assert_eq!(Layout::for_value(&self.queue), Layout::new::<Stealer<T>>());
 
         // Safety: `self.queue` has the size and alignment of `Stealer` since

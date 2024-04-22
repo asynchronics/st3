@@ -71,6 +71,23 @@ jobs:
           LOOM_MAX_PREEMPTIONS: 3 
           RUSTFLAGS: --cfg st3_loom
 
+  miri:
+    name: Miri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: Run cargo miri
+        run: cargo miri test
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance
+      
   lints:
     name: Lints
     runs-on: ubuntu-latest

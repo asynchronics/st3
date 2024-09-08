@@ -1,4 +1,4 @@
-#[cfg(st3_loom)]
+#[cfg(all(test, st3_loom))]
 #[allow(unused_imports)]
 pub(crate) mod sync {
     pub(crate) mod atomic {
@@ -9,7 +9,7 @@ pub(crate) mod sync {
         pub(crate) use loom::sync::atomic::AtomicU64;
     }
 }
-#[cfg(not(st3_loom))]
+#[cfg(not(all(test, st3_loom)))]
 #[allow(unused_imports)]
 pub(crate) mod sync {
     pub(crate) mod atomic {
@@ -21,11 +21,11 @@ pub(crate) mod sync {
     }
 }
 
-#[cfg(st3_loom)]
+#[cfg(all(test, st3_loom))]
 pub(crate) mod cell {
     pub(crate) use loom::cell::UnsafeCell;
 }
-#[cfg(not(st3_loom))]
+#[cfg(not(all(test, st3_loom)))]
 pub(crate) mod cell {
     #[derive(Debug)]
     pub(crate) struct UnsafeCell<T>(core::cell::UnsafeCell<T>);
@@ -46,11 +46,11 @@ pub(crate) mod cell {
 
 #[allow(unused_macros)]
 macro_rules! debug_or_loom_assert {
-    ($($arg:tt)*) => (if cfg!(any(debug_assertions, st3_loom)) { assert!($($arg)*); })
+    ($($arg:tt)*) => (if cfg!(any(debug_assertions, all(test, st3_loom))) { assert!($($arg)*); })
 }
 #[allow(unused_macros)]
 macro_rules! debug_or_loom_assert_eq {
-    ($($arg:tt)*) => (if cfg!(any(debug_assertions, st3_loom)) { assert_eq!($($arg)*); })
+    ($($arg:tt)*) => (if cfg!(any(debug_assertions, all(test, st3_loom))) { assert_eq!($($arg)*); })
 }
 #[allow(unused_imports)]
 pub(crate) use debug_or_loom_assert;

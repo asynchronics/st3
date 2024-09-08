@@ -29,6 +29,12 @@ oorandom = "11.1"
 crossbeam-deque = "0.8"
 num_cpus = "1.13"
 
+[target.'cfg(st3_loom)'.dev-dependencies]
+loom = "0.7"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(st3_loom)'] }
+
 [[bench]]
 name = "benchmark"
 path = "benches/benchmark.rs"
@@ -37,9 +43,3 @@ harness = false
 [[test]]
 name = "integration"
 path = "tests/tests.rs"
-
-[target.'cfg(st3_loom)'.dependencies]
-loom = "0.5"
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(st3_loom)'] }

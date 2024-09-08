@@ -46,11 +46,11 @@ pub(crate) mod cell {
 
 #[allow(unused_macros)]
 macro_rules! debug_or_loom_assert {
-    ($($arg:tt)*) => (if cfg!(any(debug_assertions, tachyonix_loom)) { assert!($($arg)*); })
+    ($($arg:tt)*) => (if cfg!(any(debug_assertions, st3_loom)) { assert!($($arg)*); })
 }
 #[allow(unused_macros)]
 macro_rules! debug_or_loom_assert_eq {
-    ($($arg:tt)*) => (if cfg!(any(debug_assertions, tachyonix_loom)) { assert_eq!($($arg)*); })
+    ($($arg:tt)*) => (if cfg!(any(debug_assertions, st3_loom)) { assert_eq!($($arg)*); })
 }
 #[allow(unused_imports)]
 pub(crate) use debug_or_loom_assert;

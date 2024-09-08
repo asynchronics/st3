@@ -40,3 +40,6 @@ path = "tests/tests.rs"
 
 [target.'cfg(st3_loom)'.dependencies]
 loom = "0.5"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(st3_loom)'] }

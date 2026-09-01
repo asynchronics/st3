@@ -398,6 +398,115 @@ fn lifo_extend_overflow() {
     }
 }
 
+macro_rules! bulk_steal {
+    ($flavor:ident, $rotate:ident, $is_fifo:literal, $test_name:ident) => {
+        // Exhaustively exercises bulk `steal` with all ring position
+        // alignments: independent rotations of the source and destination,
+        // various destination occupancies and stolen counts, including
+        // transfers crossing the physical wrap point of the source, of the
+        // destination, or both, with equal or different capacities.
+        #[test]
+        fn $test_name() {
+            // Reduced coverage under Miri to keep the test fast enough.
+            //
+            // (16, 16) exercises transfers larger than the inline scalar
+            // chunk limit, i.e. the actual bulk copy path.
+            let cap_pairs: &[(usize, usize)] = if cfg!(miri) {
+                &[(8, 8)]
+            } else {
+                &[(8, 8), (16, 8), (8, 16), (16, 16)]
+            };
+            for &(src_cap, dst_cap) in cap_pairs {
+                let rotation_stride = if cfg!(miri) { 4 } else { 1 };
+                for src_rotation in (0..src_cap).step_by(rotation_stride) {
+                    for dst_rotation in (0..dst_cap).step_by(rotation_stride) {
+                        for preload in 0..dst_cap {
+                            for count in 1..=(dst_cap - preload).min(src_cap) {
+                                let src = $flavor::Worker::<TestValue<usize>>::new(src_cap);
+                                let dst = $flavor::Worker::<TestValue<usize>>::new(dst_cap);
+
+                                $rotate(&src, src_rotation);
+                                $rotate(&dst, dst_rotation);
+                                for i in 0..preload {
+                                    dst.push(TestValue::new(100 + i)).unwrap();
+                                }
+                                for i in 0..count {
+                                    src.push(TestValue::new(i)).unwrap();
+                                }
+
+                                let stolen = src.stealer().steal(&dst, |_| usize::MAX).unwrap();
+                                assert_eq!(stolen, count);
+                                assert!(src.pop().is_none());
+
+                                let mut popped = Vec::new();
+                                while let Some(v) = dst.pop() {
+                                    popped.push(*v);
+                                }
+                                let expected: Vec<usize> = if $is_fifo {
+                                    (0..preload).map(|i| 100 + i).chain(0..count).collect()
+                                } else {
+                                    (0..count)
+                                        .rev()
+                                        .chain((0..preload).rev().map(|i| 100 + i))
+                                        .collect()
+                                };
+                                assert_eq!(popped, expected);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+}
+bulk_steal!(fifo, fifo_rotate, true, fifo_bulk_steal);
+bulk_steal!(lifo, lifo_rotate, false, lifo_bulk_steal);
+
+macro_rules! bulk_self_steal {
+    ($flavor:ident, $rotate:ident, $is_fifo:literal, $test_name:ident) => {
+        // Bulk self-stealing moves items from the head to the tail of the
+        // same buffer, exercising the disjointness of the source and
+        // destination chunks with every alignment and split. The capacity
+        // is large enough for transfers to reach the bulk copy path.
+        #[test]
+        fn $test_name() {
+            const CAP: usize = 32;
+            let rotation_stride = if cfg!(miri) { 8 } else { 1 };
+
+            for rotation in (0..CAP).step_by(rotation_stride) {
+                for fill in 1..CAP {
+                    let max_count = fill.min(CAP - fill);
+                    for count in 1..=max_count {
+                        let worker = $flavor::Worker::<TestValue<usize>>::new(CAP);
+
+                        $rotate(&worker, rotation);
+                        for i in 0..fill {
+                            worker.push(TestValue::new(i)).unwrap();
+                        }
+
+                        let stolen = worker.stealer().steal(&worker, |_| count).unwrap();
+                        assert_eq!(stolen, count.min(max_count));
+
+                        let mut popped = Vec::new();
+                        while let Some(v) = worker.pop() {
+                            popped.push(*v);
+                        }
+                        // The `count` oldest items were moved to the tail.
+                        let expected: Vec<usize> = if $is_fifo {
+                            (count..fill).chain(0..count).collect()
+                        } else {
+                            (0..count).rev().chain((count..fill).rev()).collect()
+                        };
+                        assert_eq!(popped, expected);
+                    }
+                }
+            }
+        }
+    };
+}
+bulk_self_steal!(fifo, fifo_rotate, true, fifo_bulk_self_steal);
+bulk_self_steal!(lifo, lifo_rotate, false, lifo_bulk_self_steal);
+
 macro_rules! multi_threaded_steal {
     ($flavor:ident, $test_name:ident) => {
         #[test]

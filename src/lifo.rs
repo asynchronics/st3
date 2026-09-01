@@ -661,11 +661,16 @@ impl<T> Stealer<T> {
         debug_or_loom_assert!(transfer_count <= dest_free_capacity);
 
         // Move all items but the last to the destination queue.
-        for offset in 0..transfer_count {
-            unsafe {
-                let item = self.queue.read_at(old_head.wrapping_add(offset));
-                dest.queue.write_at(dest_tail.wrapping_add(offset), item);
-            }
+        unsafe {
+            crate::transfer::transfer_items(
+                &self.queue.buffer,
+                self.queue.mask,
+                old_head,
+                &dest.queue.buffer,
+                dest.queue.mask,
+                dest_tail,
+                transfer_count,
+            );
         }
 
         // Make the moved items visible by updating the destination tail position.
@@ -732,11 +737,18 @@ impl<T> Stealer<T> {
         debug_or_loom_assert!(transfer_count <= dest_free_capacity);
 
         // Move all items but the last to the destination queue.
-        for offset in 0..transfer_count {
-            unsafe {
-                let item = self.queue.read_at(old_head.wrapping_add(offset));
-                dest.queue.write_at(dest_tail.wrapping_add(offset), item);
-            }
+        //
+        // Safety: see the `steal()` method.
+        unsafe {
+            crate::transfer::transfer_items(
+                &self.queue.buffer,
+                self.queue.mask,
+                old_head,
+                &dest.queue.buffer,
+                dest.queue.mask,
+                dest_tail,
+                transfer_count,
+            );
         }
 
         // Read the last item.

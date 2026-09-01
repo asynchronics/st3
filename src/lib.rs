@@ -66,6 +66,7 @@ mod config;
 pub mod fifo;
 pub mod lifo;
 mod loom_exports;
+mod transfer;
 
 /// Error returned when stealing is unsuccessful.
 #[derive(Debug, Clone, PartialEq, Eq)]
